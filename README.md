@@ -39,7 +39,7 @@ honcho:
   apiKey: hch-...
   workspace: fa-dev
   aiPeer: oh-my-pi
-  peerName: zhangsan
+  username: zhangsan
   sessionStrategy: per-repo
 ```
 
@@ -84,7 +84,7 @@ honcho:
   apiKey: hch-...
   workspace: fa-dev
   aiPeer: oh-my-pi
-  peerName: zhangsan
+  username: zhangsan
   sessionStrategy: per-repo
   contextTokens: 1200
   commitEveryNTurns: 4
@@ -104,7 +104,7 @@ honcho:
 | `HONCHO_API_KEY` | Honcho API key |
 | `HONCHO_URL` | Honcho endpoint |
 | `HONCHO_WORKSPACE` | Workspace ID |
-| `HONCHO_PEER_NAME` | Developer peer name |
+| `HONCHO_USERNAME` | Developer username |
 | `HONCHO_AI_PEER` | AI peer name |
 | `HONCHO_PROJECT_PEER` | Active project peer name |
 
