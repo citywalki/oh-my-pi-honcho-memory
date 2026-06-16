@@ -1,6 +1,6 @@
 {
   "name": "@fa-software/oh-my-pi-honcho-memory",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "type": "module",
   "description": "Honcho multi-developer memory extension for oh-my-pi",
   "license": "MIT",
