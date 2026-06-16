@@ -144,11 +144,11 @@ workspace: fa-dev
 └── peer: ai-oh-my-pi
 ```
 
-- `user:{developer}` - captures each developer's voice and observations
-- `project:{id}` - captures team conventions and project decisions
-- `ai:oh-my-pi` - the assistant identity that observes and reasons
+- `user-{developer}` - captures each developer's voice and observations
+- `project-{id}` - captures team conventions and project decisions
+- `ai-oh-my-pi` - the assistant identity that observes and reasons
 
-Conversational turns are automatically saved under the current `user:{developer}` peer. Project knowledge is only written when explicitly saved.
+Conversational turns are automatically saved under the current `user-{developer}` peer. Project knowledge is only written when explicitly saved.
 
 ## Commands
 
@@ -189,17 +189,20 @@ omp update @fa-software/oh-my-pi-honcho-memory
 
 ## Publishing
 
-Releases are automated via GitHub Actions. To publish a new version:
+**Do not run `npm publish` locally.** Releases are automated via GitHub Actions.
 
-1. Run the release script locally:
+To publish a new version:
+
+1. Make sure `main` is in a releasable state and all changes are pushed.
+2. Run the release script locally to bump the version and push a tag:
 
 ```bash
 bun run release patch   # or minor / major
 ```
 
-This bumps `package.json`, commits, tags `vX.Y.Z`, and pushes the tag.
+This runs `npm version`, which bumps `package.json`, commits, tags `vX.Y.Z`, and pushes the tag to GitHub.
 
-2. The `Release` workflow builds the package and publishes it to npm with provenance.
+3. The `Release` workflow (`.github/workflows/release.yml`) will build the package and publish it to npm with provenance.
 
 A `CI` workflow also runs on every push and pull request to verify the build and type checks.
 
