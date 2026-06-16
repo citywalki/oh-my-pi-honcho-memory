@@ -16,32 +16,19 @@ Give oh-my-pi long-term memory that survives context wipes, session restarts, an
 
 ### Step 2: Install the Extension
 
-Install the published npm package into oh-my-pi's user extension discovery path:
+Install the plugin directly from npm using the `omp` CLI:
 
 ```bash
-mkdir -p ~/.omp/agent/extensions/oh-my-pi-honcho-memory
-cd ~/.omp/agent/extensions/oh-my-pi-honcho-memory
-bun init -y
-bun install @fa-software/oh-my-pi-honcho-memory
+omp install @fa-software/oh-my-pi-honcho-memory
 ```
 
-Then create an extension manifest so oh-my-pi can find the entry point:
+To install it only for the current project:
 
 ```bash
-cat > package.json <<'EOF'
-{
-  "name": "oh-my-pi-honcho-memory-extension",
-  "private": true,
-  "omp": {
-    "extensions": [
-      "./node_modules/@fa-software/oh-my-pi-honcho-memory/dist/index.js"
-    ]
-  }
-}
-EOF
+omp install -l @fa-software/oh-my-pi-honcho-memory
 ```
 
-oh-my-pi will discover the extension automatically from `~/.omp/agent/extensions/` on next startup.
+oh-my-pi will discover the extension automatically on next startup.
 
 ### Step 3: Configure
 
@@ -189,10 +176,16 @@ git clone https://github.com/citywalki/oh-my-pi-honcho-memory.git
 cd oh-my-pi-honcho-memory
 bun install
 bun run build
-ln -s "$PWD" ~/.omp/agent/extensions/oh-my-pi-honcho-memory
+omp install ./
 ```
 
 Then restart oh-my-pi.
+
+To update the installed plugin after publishing a new version:
+
+```bash
+omp update @fa-software/oh-my-pi-honcho-memory
+```
 
 ## Publishing
 

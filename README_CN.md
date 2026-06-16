@@ -16,32 +16,19 @@
 
 ### 第二步：安装扩展
 
-将已发布的 npm 包装到 oh-my-pi 的用户扩展发现路径：
+通过 `omp` CLI 直接从 npm 安装插件：
 
 ```bash
-mkdir -p ~/.omp/agent/extensions/oh-my-pi-honcho-memory
-cd ~/.omp/agent/extensions/oh-my-pi-honcho-memory
-bun init -y
-bun install @fa-software/oh-my-pi-honcho-memory
+omp install @fa-software/oh-my-pi-honcho-memory
 ```
 
-然后创建扩展清单，让 oh-my-pi 找到入口文件：
+仅在当前项目中安装：
 
 ```bash
-cat > package.json <<'EOF'
-{
-  "name": "oh-my-pi-honcho-memory-extension",
-  "private": true,
-  "omp": {
-    "extensions": [
-      "./node_modules/@fa-software/oh-my-pi-honcho-memory/dist/index.js"
-    ]
-  }
-}
-EOF
+omp install -l @fa-software/oh-my-pi-honcho-memory
 ```
 
-oh-my-pi 下次启动时会自动从 `~/.omp/agent/extensions/` 加载该扩展。
+oh-my-pi 下次启动时会自动加载该扩展。
 
 ### 第三步：配置
 
@@ -189,10 +176,16 @@ git clone https://github.com/citywalki/oh-my-pi-honcho-memory.git
 cd oh-my-pi-honcho-memory
 bun install
 bun run build
-ln -s "$PWD" ~/.omp/agent/extensions/oh-my-pi-honcho-memory
+omp install ./
 ```
 
 然后重启 oh-my-pi。
+
+发布新版本后，更新已安装的插件：
+
+```bash
+omp update @fa-software/oh-my-pi-honcho-memory
+```
 
 ## 发布
 
