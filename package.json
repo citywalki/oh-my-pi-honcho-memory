@@ -1,0 +1,33 @@
+{
+  "name": "oh-my-pi-honcho-memory",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Honcho multi-developer memory extension for oh-my-pi",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "bun build ./extensions/index.ts --outdir ./dist --target bun --external @oh-my-pi/pi-coding-agent && tsc --emitDeclarationOnly",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@honcho-ai/sdk": "^2.1.1",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.2.8",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.13.9",
+    "typescript": "^5.9.3",
+    "zod": "^4.4.3"
+  },
+  "omp": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  }
+}
