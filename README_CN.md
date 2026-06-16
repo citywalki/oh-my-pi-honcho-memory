@@ -179,6 +179,22 @@ ln -s "$PWD" ~/.omp/agent/extensions/oh-my-pi-honcho-memory
 
 然后重启 oh-my-pi。
 
+## 发布
+
+发布流程由 GitHub Actions 自动化。发布新版本：
+
+1. 本地执行发布脚本：
+
+```bash
+bun run release patch   # 或 minor / major
+```
+
+这会更新 `package.json` 版本号，创建提交，打标签 `vX.Y.Z`，并推送标签。
+
+2. `Release` 工作流会自动构建并发布到 npm，并附带 provenance 证明。
+
+每次推送和 Pull Request 都会触发 `CI` 工作流，执行构建和类型检查。
+
 ## 许可证
 
 MIT

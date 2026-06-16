@@ -179,6 +179,22 @@ ln -s "$PWD" ~/.omp/agent/extensions/oh-my-pi-honcho-memory
 
 Then restart oh-my-pi.
 
+## Publishing
+
+Releases are automated via GitHub Actions. To publish a new version:
+
+1. Run the release script locally:
+
+```bash
+bun run release patch   # or minor / major
+```
+
+This bumps `package.json`, commits, tags `vX.Y.Z`, and pushes the tag.
+
+2. The `Release` workflow builds the package and publishes it to npm with provenance.
+
+A `CI` workflow also runs on every push and pull request to verify the build and type checks.
+
 ## License
 
 MIT
