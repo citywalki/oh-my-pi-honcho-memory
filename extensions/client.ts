@@ -71,10 +71,10 @@ export async function createHonchoHandles(params: {
 		workspaceId: params.config.workspace,
 	});
 
-	const userPeerId = `user:${params.config.peerName}`;
-	const aiPeerId = `ai:${params.config.aiPeer.replace(/^ai-/, "")}`;
+	const userPeerId = `user-${params.config.peerName}`;
+	const aiPeerId = `ai-${params.config.aiPeer.replace(/^ai-/, "")}`;
 	const projectPeerId = params.config.projectPeer
-		? `project:${params.config.projectPeer.replace(/^project-/, "")}`
+		? `project-${params.config.projectPeer.replace(/^project-/, "")}`
 		: null;
 
 	const [userPeer, aiPeer, session] = await Promise.all([
