@@ -245,44 +245,42 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		if (!handles) { log(`before_agent_start: no handles, exiting`); return {}; }
 
 		const state = getState(handles.sessionId);
+		state.messageCount += 1;
+
+		// Extract query from event messages if the harness provides them.
 		const query = (event.messages ?? [])
 			.filter((m) => m.role === "user")
 			.map((m) => extractTextFromMessage(m))
 			.join("\n");
+		const hasQuery = query.trim().length > 0 && !SKIP_PATTERNS.some((p) => p.test(query.trim()));
 
-		// Skip trivial prompts — no context needed (Claude pattern).
-		if (!query.trim() || SKIP_PATTERNS.some((p) => p.test(query.trim()))) {
-			log(`before_agent_start: skipping context (trivial/empty prompt)`);
-			state.messageCount += 1;
-			return {};
-		}
-
-		// Prompt context: cached vs fresh fetch (Claude pattern — no hydrate).
+		// Prompt context: cached vs fresh fetch (only when meaningful query available).
 		const { ttlSeconds, messageThreshold } = handles.config.contextRefresh;
 		let promptContext: PromptContextBlock | null = null;
-		const cacheIsStale = isCacheStale(state, ttlSeconds, messageThreshold);
-		const queryChanged = query !== state.lastPromptContextQuery;
 
-		if (state.contextCache.block && !cacheIsStale && !queryChanged) {
-			promptContext = state.contextCache.block;
-			log(`before_agent_start: serving prompt context from cache`);
-		} else if (query.trim()) {
-			const t1 = Date.now();
-			const fresh = await refreshContextWithTimeout(handles, query);
-			log(`before_agent_start: refreshContext done in ${Date.now() - t1}ms, got=${!!fresh}`);
-			if (fresh) {
-				state.contextCache = { block: fresh, queriedAt: Date.now(), messageCount: state.messageCount };
-				state.lastPromptContextQuery = query;
-				promptContext = fresh;
-			} else if (state.contextCache.block) {
-				log(`before_agent_start: refresh failed, falling back to stale cache`);
+		if (hasQuery) {
+			const cacheIsStale = isCacheStale(state, ttlSeconds, messageThreshold);
+			const queryChanged = query !== state.lastPromptContextQuery;
+
+			if (state.contextCache.block && !cacheIsStale && !queryChanged) {
 				promptContext = state.contextCache.block;
+				log(`before_agent_start: serving prompt context from cache`);
+			} else {
+				const t1 = Date.now();
+				const fresh = await refreshContextWithTimeout(handles, query);
+				log(`before_agent_start: refreshContext done in ${Date.now() - t1}ms, got=${!!fresh}`);
+				if (fresh) {
+					state.contextCache = { block: fresh, queriedAt: Date.now(), messageCount: state.messageCount };
+					state.lastPromptContextQuery = query;
+					promptContext = fresh;
+				} else if (state.contextCache.block) {
+					log(`before_agent_start: refresh failed, falling back to stale cache`);
+					promptContext = state.contextCache.block;
+				}
 			}
 		}
 
-		state.messageCount += 1;
-
-		// Use cached memory block from session_start (Claude: no hydrate on every prompt).
+		// Always compile and inject base memory context from session_start cache.
 		const compiled = compileMemoryContext(state.lastMemoryBlock ?? {
 			userRepresentation: "", userPeerCard: null,
 			aiRepresentation: "", aiPeerCard: null,
@@ -302,7 +300,7 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		}
 		if (sessionToolHint) systemPrompt.push(sessionToolHint);
 
-		log(`before_agent_start: DONE total=${Date.now() - t0}ms, promptLen=${compiled?.length ?? 0}`);
+		log(`before_agent_start: DONE total=${Date.now() - t0}ms, promptLen=${compiled?.length ?? 0}, hasQuery=${hasQuery}`);
 		if (systemPrompt.length) return { systemPrompt };
 		return {};
 	});
