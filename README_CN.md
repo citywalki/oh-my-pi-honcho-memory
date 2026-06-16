@@ -16,14 +16,29 @@
 
 ### 第二步：安装扩展
 
-将本扩展克隆到 oh-my-pi 的用户扩展发现路径：
+将已发布的 npm 包装到 oh-my-pi 的用户扩展发现路径：
 
 ```bash
-git clone https://github.com/citywalki/oh-my-pi-honcho-memory.git \
-  ~/.omp/agent/extensions/oh-my-pi-honcho-memory
+mkdir -p ~/.omp/agent/extensions/oh-my-pi-honcho-memory
 cd ~/.omp/agent/extensions/oh-my-pi-honcho-memory
-bun install
-bun run build
+bun init -y
+bun install @fa-software/oh-my-pi-honcho-memory
+```
+
+然后创建扩展清单，让 oh-my-pi 找到入口文件：
+
+```bash
+cat > package.json <<'EOF'
+{
+  "name": "oh-my-pi-honcho-memory-extension",
+  "private": true,
+  "omp": {
+    "extensions": [
+      "./node_modules/@fa-software/oh-my-pi-honcho-memory/dist/index.js"
+    ]
+  }
+}
+EOF
 ```
 
 oh-my-pi 下次启动时会自动从 `~/.omp/agent/extensions/` 加载该扩展。
@@ -167,7 +182,7 @@ workspace: fa-dev
 
 ## 本地开发
 
-本地测试流程：
+本地开发或调试本扩展：
 
 ```bash
 git clone https://github.com/citywalki/oh-my-pi-honcho-memory.git

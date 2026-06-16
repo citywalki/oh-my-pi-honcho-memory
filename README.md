@@ -16,14 +16,29 @@ Give oh-my-pi long-term memory that survives context wipes, session restarts, an
 
 ### Step 2: Install the Extension
 
-Clone this extension into oh-my-pi's user extension discovery path:
+Install the published npm package into oh-my-pi's user extension discovery path:
 
 ```bash
-git clone https://github.com/citywalki/oh-my-pi-honcho-memory.git \
-  ~/.omp/agent/extensions/oh-my-pi-honcho-memory
+mkdir -p ~/.omp/agent/extensions/oh-my-pi-honcho-memory
 cd ~/.omp/agent/extensions/oh-my-pi-honcho-memory
-bun install
-bun run build
+bun init -y
+bun install @fa-software/oh-my-pi-honcho-memory
+```
+
+Then create an extension manifest so oh-my-pi can find the entry point:
+
+```bash
+cat > package.json <<'EOF'
+{
+  "name": "oh-my-pi-honcho-memory-extension",
+  "private": true,
+  "omp": {
+    "extensions": [
+      "./node_modules/@fa-software/oh-my-pi-honcho-memory/dist/index.js"
+    ]
+  }
+}
+EOF
 ```
 
 oh-my-pi will discover the extension automatically from `~/.omp/agent/extensions/` on next startup.
@@ -167,7 +182,7 @@ The extension exposes these tools inside oh-my-pi:
 
 ## Development
 
-For local testing:
+For developing or debugging this extension locally:
 
 ```bash
 git clone https://github.com/citywalki/oh-my-pi-honcho-memory.git
