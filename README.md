@@ -2,6 +2,8 @@
 
 > Add AI-native memory to oh-my-pi
 
+[English](README.md) | [中文](README_CN.md)
+
 Give oh-my-pi long-term memory that survives context wipes, session restarts, and fresh chats. Honcho remembers what you're working on, durable preferences, and prior context across your projects.
 
 ## Quick Start

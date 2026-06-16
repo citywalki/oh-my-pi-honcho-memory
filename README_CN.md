@@ -2,6 +2,8 @@
 
 > 为 oh-my-pi 添加 AI 原生长期记忆
 
+[English](README.md) | [中文](README_CN.md)
+
 让 oh-my-pi 拥有跨会话、跨重启的长期记忆能力。Honcho 会记住你正在做什么、持久化的偏好设置，以及各个项目中的上下文。
 
 ## 快速开始
