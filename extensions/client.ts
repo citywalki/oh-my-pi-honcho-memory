@@ -14,9 +14,12 @@ export interface HonchoPeer {
 	id: string;
 	message(content: string, options?: { metadata?: Record<string, unknown>; createdAt?: string }): HonchoMessage;
 	context(options?: {
+		target?: string | HonchoPeer;
+		searchQuery?: string;
+		searchTopK?: number;
+		searchMaxDistance?: number;
 		maxConclusions?: number;
 		includeMostFrequent?: boolean;
-		topic?: string;
 	}): Promise<{ representation: string; peerCard: string[] | null }>;
 	conclusionsOf(targetPeer: HonchoPeer): {
 		create(params: { content: string; sessionId?: string }): Promise<unknown>;

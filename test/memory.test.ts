@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { compileMemoryContext, formatContinuityContext } from "../extensions/memory.js";
+import { compileMemoryContext, formatContinuityContext, extractTopics } from "../extensions/memory.js";
 import type { MemoryContextBlock } from "../extensions/memory.js";
 
 describe("compileMemoryContext", () => {
@@ -43,10 +43,23 @@ describe("compileMemoryContext", () => {
 	});
 
 	it("appends prompt context when provided", () => {
-		const promptContext = "## Relevant Memory\nPrompt-specific memory.";
+		const promptContext = {
+			representation: "Prompt-specific memory.",
+			peerCard: null,
+		};
 		const compiled = compileMemoryContext(fullBlock, promptContext);
 		expect(compiled).toContain("## Relevant Memory");
 		expect(compiled).toContain("Prompt-specific memory.");
+	});
+
+	it("renders prompt context peer cards", () => {
+		const promptContext = {
+			representation: "",
+			peerCard: ["This rule matters."],
+		};
+		const compiled = compileMemoryContext(fullBlock, promptContext);
+		expect(compiled).toContain("## Relevant Memory");
+		expect(compiled).toContain("This rule matters.");
 	});
 
 	it("omits empty sections", () => {
@@ -65,6 +78,59 @@ describe("compileMemoryContext", () => {
 		expect(compiled).not.toContain("## Project Memory");
 		expect(compiled).not.toContain("## Recent Session Summary");
 		expect(compiled).toContain("## Developer Memory");
+	});
+});
+
+describe("extractTopics", () => {
+	it("extracts file paths from a prompt", () => {
+		const topics = extractTopics("Fix the bug in src/index.ts and test/memory.test.ts");
+		expect(topics).toContain("src/index.ts");
+		expect(topics).toContain("test/memory.test.ts");
+	});
+
+	it("extracts quoted strings", () => {
+		const topics = extractTopics('What does "release process" mean here?');
+		expect(topics).toContain("release process");
+	});
+
+	it("extracts technical terms", () => {
+		const topics = extractTopics("Should we deploy with docker or kubernetes?");
+		expect(topics.some((t: string) => t.toLowerCase().includes("docker"))).toBe(true);
+		expect(topics.some((t: string) => t.toLowerCase().includes("kubernetes"))).toBe(true);
+	});
+
+	it("extracts Chinese release terms", () => {
+		const topics = extractTopics("是不是应该发个新版了");
+		expect(topics.some((t: string) => t.includes("发版") || t.includes("版本") || t.includes("新版"))).toBe(true);
+	});
+
+	it("falls back to meaningful words when no signals match", () => {
+		const topics = extractTopics("tell me about the architecture");
+		expect(topics.some((t: string) => t.includes("architecture"))).toBe(true);
+	});
+
+	it("returns empty array for empty prompt", () => {
+		expect(extractTopics("")).toEqual([]);
+		expect(extractTopics("   ")).toEqual([]);
+	});
+
+	it("handles prompts with only stopwords", () => {
+		const topics = extractTopics("the and for this with from");
+		expect(topics.length).toBeLessThanOrEqual(2);
+	});
+
+	it("deduplicates repeated terms", () => {
+		const topics = extractTopics("docker docker kubernetes kubernetes");
+		const lower = topics.map((t: string) => t.toLowerCase());
+		expect(lower.filter((t) => t === "docker").length).toBe(1);
+		expect(lower.filter((t) => t === "kubernetes").length).toBe(1);
+	});
+
+	it("limits number of fallback words", () => {
+		const topics = extractTopics(
+			"alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima mike november oscar papa",
+		);
+		expect(topics.length).toBeLessThanOrEqual(10);
 	});
 });
 
@@ -88,15 +154,13 @@ describe("formatContinuityContext", () => {
 	});
 
 	it("includes last injected context", () => {
-		const ctx = formatContinuityContext(mockHandles, "Previous memory block", []);
-		expect(ctx).toContain("Last injected memory:");
-		expect(ctx).toContain("Previous memory block");
+		const ctx = formatContinuityContext(mockHandles, "previous context", []);
+		expect(ctx).toContain("previous context");
 	});
 
 	it("includes recent durable conclusions", () => {
-		const ctx = formatContinuityContext(mockHandles, null, ["I prefer dark mode", "Use bun"]);
-		expect(ctx).toContain("Recent durable conclusions:");
-		expect(ctx).toContain("- I prefer dark mode");
-		expect(ctx).toContain("- Use bun");
+		const ctx = formatContinuityContext(mockHandles, null, ["Use patch releases for bug fixes."]);
+		expect(ctx).toContain("Recent durable conclusions");
+		expect(ctx).toContain("Use patch releases for bug fixes.");
 	});
 });

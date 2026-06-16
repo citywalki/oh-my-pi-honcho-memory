@@ -15,6 +15,8 @@ import {
 	saveToolSummary,
 	saveUserConclusion,
 	formatContinuityContext,
+	type PromptContextBlock,
+	type ContextCache,
 } from "./memory.js";
 import {
 	extractTextFromMessage,
@@ -29,8 +31,9 @@ import { registerTools } from "./tools.js";
 interface SessionState {
 	handles: HonchoHandles | null;
 	lastMemoryContext: string | null;
-	cachedPromptContext: string | null;
+	contextCache: ContextCache;
 	lastPromptContextQuery: string | null;
+	messageCount: number;
 	lastUserTurnCount: number;
 	recentConclusions: string[];
 }
@@ -39,12 +42,15 @@ function createSessionState(): SessionState {
 	return {
 		handles: null,
 		lastMemoryContext: null,
-		cachedPromptContext: null,
+		contextCache: { block: null, queriedAt: 0, messageCount: 0 },
 		lastPromptContextQuery: null,
+		messageCount: 0,
 		lastUserTurnCount: 0,
 		recentConclusions: [],
 	};
 }
+
+const CONTEXT_FETCH_TIMEOUT_MS = 4000;
 
 export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 	const sessions = new Map<SessionKey, SessionState>();
@@ -94,6 +100,33 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		return getRuntime(ctx, sessionId);
 	}
 
+	async function fetchPromptContext(
+		handles: HonchoHandles,
+		query: string,
+	): Promise<PromptContextBlock | null> {
+		return refreshPromptContext(handles, query, handles.config.observationMode);
+	}
+
+	async function refreshContextWithTimeout(
+		handles: HonchoHandles,
+		query: string,
+	): Promise<PromptContextBlock | null> {
+		const fetchPromise = fetchPromptContext(handles, query).then((block) => ({ ok: true as const, block }));
+		const timeoutPromise = new Promise<{ ok: false }>((resolve) =>
+			setTimeout(() => resolve({ ok: false }), CONTEXT_FETCH_TIMEOUT_MS),
+		);
+		const result = await Promise.race([fetchPromise, timeoutPromise]).catch((): { ok: false } => ({ ok: false }));
+		return result.ok ? result.block : null;
+	}
+
+	function isCacheStale(state: SessionState, ttlSeconds: number, messageThreshold: number): boolean {
+		const now = Date.now();
+		const ttlExpired = state.contextCache.queriedAt === 0 || (now - state.contextCache.queriedAt) / 1000 > ttlSeconds;
+		const thresholdReached =
+			state.contextCache.messageCount === 0 || state.messageCount - state.contextCache.messageCount >= messageThreshold;
+		return ttlExpired || thresholdReached;
+	}
+
 	pi.on("session_start", async (_event, ctx) => {
 		const sessionId = ctx.sessionManager.sessionId ?? "default";
 		const handles = await bootstrap(ctx.cwd, sessionId);
@@ -101,14 +134,29 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		const state = getState(handles.sessionId);
 		const memoryBlock = await hydrateMemoryContext(handles);
 		state.lastMemoryContext = compileMemoryContext(memoryBlock, null);
+
+		// Warm prompt context cache with a neutral workspace query.
+		try {
+			const warm = await fetchPromptContext(handles, handles.config.workspace);
+			if (warm) {
+				state.contextCache = {
+					block: warm,
+					queriedAt: Date.now(),
+					messageCount: 0,
+				};
+			}
+		} catch {
+			// Warm-up failure is non-fatal; context will be fetched on first prompt.
+		}
 	});
 
 	pi.on("session_switch", async (_event, ctx) => {
 		const handles = await getHandlesFromCtx(ctx);
 		if (!handles) return;
 		const state = getState(handles.sessionId);
-		state.cachedPromptContext = null;
+		state.contextCache = { block: null, queriedAt: 0, messageCount: 0 };
 		state.lastPromptContextQuery = null;
+		state.messageCount = 0;
 		const memoryBlock = await hydrateMemoryContext(handles);
 		state.lastMemoryContext = compileMemoryContext(memoryBlock, null);
 	});
@@ -123,23 +171,51 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 			.map((m) => extractTextFromMessage(m))
 			.join("\n");
 
-		let promptContext: string | null = null;
-		if (query.trim() && query !== state.lastPromptContextQuery) {
-			promptContext = await refreshPromptContext(handles, query);
-			state.cachedPromptContext = promptContext;
-			state.lastPromptContextQuery = query;
+		const { ttlSeconds, messageThreshold } = handles.config.contextRefresh;
+		let promptContext: PromptContextBlock | null = null;
+		const cacheIsStale = isCacheStale(state, ttlSeconds, messageThreshold);
+		const queryChanged = query.trim() && query !== state.lastPromptContextQuery;
+
+		if (state.contextCache.block && !cacheIsStale && !queryChanged) {
+			// Fresh cache — serve instantly.
+			promptContext = state.contextCache.block;
+		} else if (query.trim()) {
+			// Try a fresh fetch with timeout.
+			const fresh = await refreshContextWithTimeout(handles, query);
+			if (fresh) {
+				state.contextCache = {
+					block: fresh,
+					queriedAt: Date.now(),
+					messageCount: state.messageCount,
+				};
+				state.lastPromptContextQuery = query;
+				promptContext = fresh;
+			} else if (state.contextCache.block) {
+				// Fetch failed or timed out — fall back to stale cache.
+				promptContext = state.contextCache.block;
+			}
 		} else {
-			promptContext = state.cachedPromptContext;
+			promptContext = state.contextCache.block;
 		}
 
-		const compiled = compileMemoryContext(
-			await hydrateMemoryContext(handles),
-			promptContext,
-		);
+		state.messageCount += 1;
+
+		const compiled = compileMemoryContext(await hydrateMemoryContext(handles), promptContext);
 		state.lastMemoryContext = compiled;
 
-		if (compiled) {
-			return { systemPrompt: [compiled] };
+		const systemPrompt: string[] = [];
+		if (compiled) systemPrompt.push(compiled);
+
+		// First prompt of the session: nudge active use of Honcho tools.
+		if (state.messageCount === 1) {
+			systemPrompt.push(
+				"Honcho memory tools are available — call honcho_search, honcho_get_context, or honcho_chat to recall " +
+					"facts across sessions, and honcho_add_conclusion to save new insights.",
+			);
+		}
+
+		if (systemPrompt.length) {
+			return { systemPrompt };
 		}
 		return {};
 	});
@@ -185,16 +261,26 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		const handles = await getHandlesFromCtx(ctx);
 		if (!handles) return;
 		const state = getState(handles.sessionId);
-		state.cachedPromptContext = null;
+		state.contextCache = { block: null, queriedAt: 0, messageCount: 0 };
 
 		const memoryBlock = await hydrateMemoryContext(handles);
-		const continuity = formatContinuityContext(
-			handles,
-			state.lastMemoryContext,
-			state.recentConclusions,
-		);
-		const compiled = compileMemoryContext(memoryBlock, continuity);
-		state.lastMemoryContext = compiled;
+		const compiled = compileMemoryContext(memoryBlock, null);
+		const continuity = formatContinuityContext(handles, state.lastMemoryContext, state.recentConclusions);
+		state.lastMemoryContext = [compiled, continuity].filter(Boolean).join("\n\n") || null;
+
+		// Re-warm prompt context cache before compact.
+		try {
+			const warm = await fetchPromptContext(handles, handles.config.workspace);
+			if (warm) {
+				state.contextCache = {
+					block: warm,
+					queriedAt: Date.now(),
+					messageCount: state.messageCount,
+				};
+			}
+		} catch {
+			// Re-warm failure is non-fatal.
+		}
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
@@ -206,4 +292,3 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 	registerTools(pi, { getHandles: getHandlesFromCtx });
 	registerCommands(pi, { getHandles: getHandlesFromCtx });
 }
-

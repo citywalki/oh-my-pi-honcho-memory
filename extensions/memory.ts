@@ -10,6 +10,24 @@ export interface MemoryContextBlock {
 	summary: string | null;
 }
 
+export interface PromptContextBlock {
+	representation: string;
+	peerCard: string[] | null;
+}
+
+export interface ContextCache {
+	block: PromptContextBlock | null;
+	queriedAt: number;
+	messageCount: number;
+}
+
+export interface PromptContextOptions {
+	searchQuery: string;
+	maxConclusions?: number;
+	searchTopK?: number;
+	searchMaxDistance?: number;
+}
+
 function clampText(value: string, maxChars: number): string {
 	if (value.length <= maxChars) return value;
 	return `${value.slice(0, Math.max(0, maxChars - 3))}...`;
@@ -62,30 +80,146 @@ export async function hydrateMemoryContext(handles: HonchoHandles): Promise<Memo
 export async function refreshPromptContext(
 	handles: HonchoHandles,
 	query: string,
-): Promise<string | null> {
+	observationMode: "unified" | "directional" = "unified",
+): Promise<PromptContextBlock | null> {
 	if (!query.trim()) return null;
 
-	const sessionContext = await handles.session.context({
-		summary: true,
-		peerPerspective: handles.aiPeer,
-		peerTarget: handles.userPeer,
-		representationOptions: {
-			searchQuery: query,
-			searchTopK: 5,
-			searchMaxDistance: 0.7,
-			maxConclusions: 6,
-		},
+	const topics = extractTopics(query);
+	const searchQuery = topics.length > 0 ? topics.join(" ") : query;
+
+	const contextPeer = observationMode === "directional" ? handles.aiPeer : handles.userPeer;
+	const target = observationMode === "directional" ? handles.userPeer : undefined;
+
+	const result = await contextPeer.context({
+		...(target ? { target } : {}),
+		searchQuery,
+		searchTopK: 5,
+		searchMaxDistance: 0.7,
+		maxConclusions: 15,
+		includeMostFrequent: true,
 	});
 
-	const summary = parseSessionSummary(sessionContext.summary);
-	const representation = parseRepresentation(sessionContext.peerRepresentation);
+	const representation = parseRepresentation(result.representation);
+	if (!representation && !result.peerCard?.length) return null;
 
-	if (!summary && !representation) return null;
+	return {
+		representation,
+		peerCard: result.peerCard,
+	};
+}
+/**
+ * Extract meaningful topics from a prompt for semantic search.
+ * Returns terms that are high-signal for conclusion matching.
+ * Based on the official Honcho Claude Code plugin's approach.
+ */
+export function extractTopics(prompt: string): string[] {
+	const topics: string[] = [];
 
-	const parts: string[] = [];
-	if (summary) parts.push(`## Recent Session Summary\n${summary}`);
-	if (representation) parts.push(`## Relevant Memory\n${representation}`);
-	return parts.join("\n\n");
+	// File paths (high signal)
+	const filePaths = prompt.match(/[\w\-\/\.]+\.(ts|tsx|js|jsx|py|rs|go|md|json|yaml|yml|toml|sql)/gi) || [];
+	topics.push(...filePaths.slice(0, 5));
+
+	// Quoted strings (explicit references)
+	const quoted = prompt.match(/"([^"]+)"/g)?.map((q) => q.slice(1, -1)) || [];
+	topics.push(...quoted.slice(0, 3));
+
+	// Technical terms (English and common Chinese-English mix)
+	const techTerms =
+		prompt.match(
+			/\b(react|vue|svelte|angular|elysia|express|fastapi|django|flask|postgres|redis|docker|kubernetes|bun|node|deno|typescript|python|rust|go|graphql|rest|api|auth|oauth|jwt|stripe|webhook|honcho|mcp|claude|cursor|sentry|github|npm|release|publish|deploy|ci|test|build|lint|format)\b/gi,
+		) || [];
+	const releaseTerms = prompt.match(/(发版|发布|上线|部署|测试|构建|发布流程|npm|版本|新版)/gi) || [];
+	topics.push(...[...new Set(techTerms.map((t) => t.toLowerCase()))].slice(0, 5));
+	topics.push(...[...new Set(releaseTerms)].slice(0, 5));
+
+	// Error / status patterns
+	const errors = prompt.match(/error[:\s]+[\w\s]+|failed[:\s]+[\w\s]+|exception[:\s]+[\w\s]+|失败|错误|报错/gi) || [];
+	topics.push(...errors.slice(0, 2));
+
+	if (topics.length > 0) {
+		return [...new Set(topics)];
+	}
+
+	// Fallback: meaningful words >3 chars minus stopwords
+	const stopwords = new Set([
+		"the",
+		"and",
+		"for",
+		"that",
+		"this",
+		"with",
+		"from",
+		"have",
+		"are",
+		"was",
+		"were",
+		"been",
+		"being",
+		"has",
+		"had",
+		"does",
+		"did",
+		"will",
+		"would",
+		"could",
+		"should",
+		"can",
+		"may",
+		"might",
+		"must",
+		"shall",
+		"need",
+		"want",
+		"like",
+		"just",
+		"also",
+		"more",
+		"some",
+		"what",
+		"when",
+		"where",
+		"which",
+		"who",
+		"how",
+		"why",
+		"all",
+		"each",
+		"every",
+		"both",
+		"few",
+		"most",
+		"other",
+		"into",
+		"over",
+		"such",
+		"only",
+		"same",
+		"than",
+		"very",
+		"your",
+		"make",
+		"take",
+		"come",
+		"give",
+		"look",
+		"think",
+		"know",
+		"我们",
+		"应该",
+		"可以",
+		"需要",
+		"这个",
+		"那个",
+		"什么",
+		"怎么",
+		"为什么",
+		"因为",
+		"所以",
+		"但是",
+		"然后",
+	]);
+	const words = prompt.toLowerCase().match(/\b[a-z]{4,}\b/g) || [];
+	return [...new Set(words.filter((w) => !stopwords.has(w)))].slice(0, 10);
 }
 
 function formatPeerContextBlock(
@@ -107,7 +241,7 @@ function formatPeerContextBlock(
 
 export function compileMemoryContext(
 	block: MemoryContextBlock,
-	promptContext: string | null,
+	promptContext: PromptContextBlock | null,
 ): string | null {
 	const sections: string[] = [];
 
@@ -125,7 +259,12 @@ export function compileMemoryContext(
 	if (projectBlock) sections.push(projectBlock);
 
 	if (block.summary) sections.push(`## Recent Session Summary\n${block.summary}`);
-	if (promptContext) sections.push(promptContext);
+	const promptBlock = formatPeerContextBlock(
+		"## Relevant Memory",
+		promptContext?.representation ?? "",
+		promptContext?.peerCard ?? null,
+	);
+	if (promptBlock) sections.push(promptBlock);
 
 	if (sections.length === 0) return null;
 

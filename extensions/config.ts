@@ -8,6 +8,8 @@ export type HonchoSessionStrategy =
 	| "per-session"
 	| "global";
 
+export type HonchoObservationMode = "unified" | "directional";
+
 export interface HonchoExtensionConfig {
 	enabled: boolean;
 	url: string;
@@ -17,8 +19,13 @@ export interface HonchoExtensionConfig {
 	aiPeer: string;
 	projectPeer: string | null;
 	sessionStrategy: HonchoSessionStrategy;
+	observationMode: HonchoObservationMode;
 	contextTokens: number;
 	commitEveryNTurns: number;
+	contextRefresh: {
+		messageThreshold: number;
+		ttlSeconds: number;
+	};
 }
 
 const DEFAULTS: HonchoExtensionConfig = {
@@ -30,8 +37,13 @@ const DEFAULTS: HonchoExtensionConfig = {
 	aiPeer: "ai-oh-my-pi",
 	projectPeer: null,
 	sessionStrategy: "per-repo",
+	observationMode: "unified",
 	contextTokens: 1200,
 	commitEveryNTurns: 4,
+	contextRefresh: {
+		messageThreshold: 30,
+		ttlSeconds: 300,
+	},
 };
 
 function readYaml(path: string): Record<string, unknown> {
