@@ -106,7 +106,7 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		if (!handles) return {};
 
 		const state = getState(handles.sessionId);
-		const query = event.messages
+		const query = (event.messages ?? [])
 			.filter((m) => m.role === "user")
 			.map((m) => extractTextFromMessage(m))
 			.join("\n");
@@ -136,7 +136,7 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		const handles = await getHandlesFromCtx(ctx);
 		if (!handles) return;
 
-		const pairs = collectMessagePairs(event.messages);
+		const pairs = collectMessagePairs(event.messages ?? []);
 		if (pairs.length === 0) return;
 
 		const state = getState(handles.sessionId);
@@ -195,9 +195,10 @@ interface MessagePair {
 }
 
 function collectMessagePairs(
-	messages: Array<{ role: string; content?: unknown }>,
+	messages: Array<{ role: string; content?: unknown }> | undefined,
 ): MessagePair[] {
 	const pairs: MessagePair[] = [];
+	if (!Array.isArray(messages)) return pairs;
 	for (const message of messages) {
 		const text = extractTextFromMessage(message);
 		if (!text) continue;
