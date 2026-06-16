@@ -1,0 +1,105 @@
+export function extractTextFromMessage(message: { role: string; content?: unknown }): string {
+	if (typeof message.content === "string") return message.content;
+	if (Array.isArray(message.content)) {
+		return message.content
+			.filter(
+				(part): part is { type: "text"; text: string } =>
+					typeof part === "object" &&
+					part !== null &&
+					"type" in part &&
+					part.type === "text" &&
+					"text" in part &&
+					typeof part.text === "string",
+			)
+			.map((part) => part.text)
+			.join("\n");
+	}
+	return "";
+}
+
+export function extractToolNameFromMessage(message: { role: string; content?: unknown }): string | null {
+	if (!Array.isArray(message.content)) return null;
+	const toolCalls = message.content.filter(
+		(part): part is { type: "toolCall"; name: string; arguments: unknown } =>
+			typeof part === "object" &&
+			part !== null &&
+			"type" in part &&
+			part.type === "toolCall" &&
+			"name" in part &&
+			typeof part.name === "string",
+	);
+	if (toolCalls.length === 0) return null;
+	return toolCalls.map((tc) => tc.name).join(", ");
+}
+
+export function summarizeToolResult(message: { role: string; content?: unknown }): string | null {
+	if (message.role !== "tool" || typeof message.content !== "string") return null;
+	const content = message.content.trim();
+	if (!content) return null;
+	const lines = content.split("\n").filter((line) => line.trim());
+	if (lines.length === 0) return null;
+	const first = lines[0].trim();
+	const summary = first.length > 120 ? `${first.slice(0, 120)}...` : first;
+	return summary;
+}
+
+export interface MessagePair {
+	role: "user" | "assistant";
+	content: string;
+}
+
+export function collectMessagePairs(
+	messages: Array<{ role: string; content?: unknown }> | undefined,
+): MessagePair[] {
+	const pairs: MessagePair[] = [];
+	if (!Array.isArray(messages)) return pairs;
+	for (const message of messages) {
+		const text = extractTextFromMessage(message);
+		if (!text) continue;
+		if (message.role === "user" || message.role === "assistant") {
+			pairs.push({ role: message.role, content: text });
+		}
+	}
+	return pairs;
+}
+
+export function collectToolSummary(
+	messages: Array<{ role: string; content?: unknown }> | undefined,
+): string | null {
+	if (!Array.isArray(messages)) return null;
+
+	const summaries: string[] = [];
+	let lastAssistantToolNames: string | null = null;
+
+	for (const message of messages) {
+		if (message.role === "assistant") {
+			lastAssistantToolNames = extractToolNameFromMessage(message);
+			continue;
+		}
+		if (message.role === "tool") {
+			const resultSummary = summarizeToolResult(message);
+			if (resultSummary) {
+				const toolNames = lastAssistantToolNames || "tool";
+				summaries.push(`${toolNames}: ${resultSummary}`);
+			}
+			lastAssistantToolNames = null;
+		}
+	}
+
+	if (summaries.length === 0) return null;
+	return summaries.join("; ");
+}
+
+const DURABLE_PATTERNS = [
+	/\b(i\s+(?:like|prefer|want|need|hate|dislike|love)|we\s+should\s+(?:always|never)|(?:always|never)\s+(?:use|do|set)|my\s+(?:preferred|favorite)|\bprefer\b|\bpreference\b)/i,
+	/(我(?:喜欢|偏好|想要|需要|讨厌|不喜欢|爱)|我们(?:应该|不应该|总是|永远|绝不|要|不要)|(?:总是|永远|绝不|不要)\s*(?:使用|做|设置)|我的(?:偏好|最爱|首选)|偏好|倾向|习惯)/,
+];
+
+export function extractDurableConclusion(content: string): string | null {
+	const trimmed = content.trim();
+	if (!trimmed) return null;
+	if (!DURABLE_PATTERNS.some((pattern) => pattern.test(trimmed))) {
+		return null;
+	}
+	return trimmed;
+}

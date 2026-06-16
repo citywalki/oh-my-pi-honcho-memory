@@ -11,7 +11,17 @@ import {
 	hydrateMemoryContext,
 	refreshPromptContext,
 	saveUserMessage,
+	saveAssistantMessage,
+	saveToolSummary,
+	saveUserConclusion,
+	formatContinuityContext,
 } from "./memory.js";
+import {
+	extractTextFromMessage,
+	collectMessagePairs,
+	collectToolSummary,
+	extractDurableConclusion,
+} from "./message-utils.js";
 import { buildSessionKey, deriveProjectRoot } from "./session-key.js";
 import { registerCommands } from "./commands.js";
 import { registerTools } from "./tools.js";
@@ -22,6 +32,7 @@ interface SessionState {
 	cachedPromptContext: string | null;
 	lastPromptContextQuery: string | null;
 	lastUserTurnCount: number;
+	recentConclusions: string[];
 }
 
 function createSessionState(): SessionState {
@@ -31,6 +42,7 @@ function createSessionState(): SessionState {
 		cachedPromptContext: null,
 		lastPromptContextQuery: null,
 		lastUserTurnCount: 0,
+		recentConclusions: [],
 	};
 }
 
@@ -141,13 +153,29 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 
 		const state = getState(handles.sessionId);
 		const newUserTurns = pairs.filter((p) => p.role === "user").length;
-		if (newUserTurns === 0) return;
 
 		for (const message of pairs) {
-			await saveUserMessage(handles, message.content, {
-				source: "agent_end",
-				role: message.role,
-			});
+			const meta = { source: "agent_end", role: message.role };
+			if (message.role === "user") {
+				await saveUserMessage(handles, message.content, meta);
+				const conclusion = extractDurableConclusion(message.content);
+				if (conclusion) {
+					const result = await saveUserConclusion(handles, conclusion);
+					if (result.saved) {
+						state.recentConclusions.unshift(conclusion);
+						if (state.recentConclusions.length > 10) {
+							state.recentConclusions.length = 10;
+						}
+					}
+				}
+			} else {
+				await saveAssistantMessage(handles, message.content, meta);
+			}
+		}
+
+		const toolSummary = collectToolSummary(event.messages ?? []);
+		if (toolSummary) {
+			await saveToolSummary(handles, toolSummary, { source: "agent_end", kind: "tool_summary" });
 		}
 
 		state.lastUserTurnCount += newUserTurns;
@@ -158,6 +186,15 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		if (!handles) return;
 		const state = getState(handles.sessionId);
 		state.cachedPromptContext = null;
+
+		const memoryBlock = await hydrateMemoryContext(handles);
+		const continuity = formatContinuityContext(
+			handles,
+			state.lastMemoryContext,
+			state.recentConclusions,
+		);
+		const compiled = compileMemoryContext(memoryBlock, continuity);
+		state.lastMemoryContext = compiled;
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
@@ -170,41 +207,3 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 	registerCommands(pi, { getHandles: getHandlesFromCtx });
 }
 
-function extractTextFromMessage(message: { role: string; content?: unknown }): string {
-	if (typeof message.content === "string") return message.content;
-	if (Array.isArray(message.content)) {
-		return message.content
-			.filter(
-				(part): part is { type: "text"; text: string } =>
-					typeof part === "object" &&
-					part !== null &&
-					"type" in part &&
-					part.type === "text" &&
-					"text" in part &&
-					typeof part.text === "string",
-			)
-			.map((part) => part.text)
-			.join("\n");
-	}
-	return "";
-}
-
-interface MessagePair {
-	role: "user" | "assistant";
-	content: string;
-}
-
-function collectMessagePairs(
-	messages: Array<{ role: string; content?: unknown }> | undefined,
-): MessagePair[] {
-	const pairs: MessagePair[] = [];
-	if (!Array.isArray(messages)) return pairs;
-	for (const message of messages) {
-		const text = extractTextFromMessage(message);
-		if (!text) continue;
-		if (message.role === "user" || message.role === "assistant") {
-			pairs.push({ role: message.role, content: text });
-		}
-	}
-	return pairs;
-}

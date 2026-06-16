@@ -3,6 +3,8 @@ import type { HonchoHandles, HonchoPeer } from "./client.js";
 export interface MemoryContextBlock {
 	userRepresentation: string;
 	userPeerCard: string[] | null;
+	aiRepresentation: string;
+	aiPeerCard: string[] | null;
 	projectRepresentation: string;
 	projectPeerCard: string[] | null;
 	summary: string | null;
@@ -20,12 +22,12 @@ function parseRepresentation(value: unknown): string {
 function parseSessionSummary(value: unknown): string {
 	return typeof value === "string" && value.trim() ? value.trim() : "";
 }
-
 export async function hydrateMemoryContext(handles: HonchoHandles): Promise<MemoryContextBlock> {
 	const projectPeer = handles.projectPeer;
 
-	const [userCtx, projectCtx, summaries] = await Promise.allSettled([
+	const [userCtx, aiCtx, projectCtx, summaries] = await Promise.allSettled([
 		handles.userPeer.context({ maxConclusions: 12, includeMostFrequent: true }),
+		handles.aiPeer.context({ maxConclusions: 8, includeMostFrequent: true }),
 		projectPeer?.context({ maxConclusions: 12, includeMostFrequent: true }) ??
 			Promise.resolve({ representation: "", peerCard: null }),
 		handles.session.summaries(),
@@ -34,6 +36,9 @@ export async function hydrateMemoryContext(handles: HonchoHandles): Promise<Memo
 	const userRepresentation =
 		userCtx.status === "fulfilled" ? parseRepresentation(userCtx.value.representation) : "";
 	const userPeerCard = userCtx.status === "fulfilled" ? userCtx.value.peerCard : null;
+	const aiRepresentation =
+		aiCtx.status === "fulfilled" ? parseRepresentation(aiCtx.value.representation) : "";
+	const aiPeerCard = aiCtx.status === "fulfilled" ? aiCtx.value.peerCard : null;
 	const projectRepresentation =
 		projectCtx.status === "fulfilled" ? parseRepresentation(projectCtx.value.representation) : "";
 	const projectPeerCard = projectCtx.status === "fulfilled" ? projectCtx.value.peerCard : null;
@@ -46,6 +51,8 @@ export async function hydrateMemoryContext(handles: HonchoHandles): Promise<Memo
 	return {
 		userRepresentation,
 		userPeerCard,
+		aiRepresentation,
+		aiPeerCard,
 		projectRepresentation,
 		projectPeerCard,
 		summary,
@@ -107,6 +114,9 @@ export function compileMemoryContext(
 	const userBlock = formatPeerContextBlock("## Developer Memory", block.userRepresentation, block.userPeerCard);
 	if (userBlock) sections.push(userBlock);
 
+	const aiBlock = formatPeerContextBlock("## Agent Work Context", block.aiRepresentation, block.aiPeerCard);
+	if (aiBlock) sections.push(aiBlock);
+
 	const projectBlock = formatPeerContextBlock(
 		"## Project Memory",
 		block.projectRepresentation,
@@ -127,6 +137,39 @@ export function compileMemoryContext(
 	].join("\n");
 }
 
+export function formatContinuityContext(
+	handles: HonchoHandles,
+	lastInjectedContext: string | null,
+	recentConclusions: string[],
+): string | null {
+	const lines: string[] = [];
+
+	lines.push("## Honcho Continuity");
+	lines.push(`Workspace: ${handles.workspaceId}`);
+	lines.push(`Session key: ${handles.sessionId}`);
+	lines.push(`User peer: ${handles.userPeerId}`);
+	lines.push(`AI peer: ${handles.aiPeerId}`);
+	if (handles.projectPeerId) {
+		lines.push(`Project peer: ${handles.projectPeerId}`);
+	}
+
+	if (lastInjectedContext) {
+		lines.push("");
+		lines.push("Last injected memory:");
+		lines.push(lastInjectedContext);
+	}
+
+	if (recentConclusions.length > 0) {
+		lines.push("");
+		lines.push("Recent durable conclusions:");
+		for (const conclusion of recentConclusions) {
+			lines.push(`- ${conclusion}`);
+		}
+	}
+
+	return lines.join("\n");
+}
+
 export async function saveUserMessage(
 	handles: HonchoHandles,
 	content: string,
@@ -137,6 +180,31 @@ export async function saveUserMessage(
 	if (!trimmed) return;
 	await handles.session.addMessages([
 		handles.userPeer.message(trimmed, { metadata, createdAt }),
+	]);
+}
+export async function saveAssistantMessage(
+	handles: HonchoHandles,
+	content: string,
+	metadata: Record<string, unknown> = {},
+	createdAt?: string,
+): Promise<void> {
+	const trimmed = clampText(content.trim(), 25_000);
+	if (!trimmed) return;
+	await handles.session.addMessages([
+		handles.aiPeer.message(trimmed, { metadata, createdAt }),
+	]);
+}
+
+export async function saveToolSummary(
+	handles: HonchoHandles,
+	summary: string,
+	metadata: Record<string, unknown> = {},
+	createdAt?: string,
+): Promise<void> {
+	const trimmed = clampText(`[Tool] ${summary.trim()}`, 25_000);
+	if (!trimmed) return;
+	await handles.session.addMessages([
+		handles.aiPeer.message(trimmed, { metadata, createdAt }),
 	]);
 }
 
@@ -171,3 +239,17 @@ export async function saveProjectConclusion(
 	});
 	return { saved: true };
 }
+export async function saveUserConclusion(
+	handles: HonchoHandles,
+	content: string,
+): Promise<{ saved: boolean; error?: string }> {
+	const trimmed = clampText(content.trim(), 25_000);
+	if (!trimmed) return { saved: false, error: "Empty content." };
+	await handles.aiPeer.conclusionsOf(handles.userPeer).create({
+		content: trimmed,
+		sessionId: handles.session.id,
+	});
+	return { saved: true };
+}
+
+

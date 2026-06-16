@@ -32,14 +32,15 @@
   "engines": {
     "node": ">=18"
   },
-  "scripts": {
-    "clean": "rm -rf dist",
-    "build": "bun build ./extensions/index.ts --outdir ./dist --target bun --external @oh-my-pi/pi-coding-agent && tsc --emitDeclarationOnly",
-    "check": "tsc --noEmit",
-    "release": "npm version",
-    "prepublishOnly": "bun run clean && bun run build",
-    "postversion": "git push --follow-tags"
-  },
+	"scripts": {
+		"clean": "rm -rf dist",
+		"build": "bun build ./extensions/index.ts --outdir ./dist --target bun --external @oh-my-pi/pi-coding-agent \u0026\u0026 tsc --emitDeclarationOnly",
+		"check": "tsc --noEmit",
+		"test": "bun test",
+		"release": "npm version",
+		"prepublishOnly": "bun run clean \u0026\u0026 bun run build",
+		"postversion": "git push --follow-tags"
+	},
   "dependencies": {
     "@honcho-ai/sdk": "^2.1.1",
     "js-yaml": "^4.1.0"
