@@ -56,9 +56,17 @@ declare module "@oh-my-pi/pi-coding-agent" {
     messages: AgentMessage[];
   };
 
+  export interface ImageContent {
+    type: "image";
+    data: string;
+    mimeType: string;
+  }
+
   export type BeforeAgentStartEvent = {
     type: "before_agent_start";
-    messages?: AgentMessage[];
+    prompt: string;
+    images?: ImageContent[];
+    systemPrompt: string[];
   };
 
   export type AgentEndEvent = {

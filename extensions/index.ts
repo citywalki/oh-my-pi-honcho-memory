@@ -21,14 +21,13 @@ import {
 	type MemoryContextBlock,
 } from "./memory.js";
 import {
-	extractTextFromMessage,
 	collectMessagePairs,
 	collectToolSummary,
 	extractDurableConclusion,
 } from "./message-utils.js";
 import { buildSessionKey, deriveProjectRoot } from "./session-key.js";
-import { registerCommands } from "./commands.js";
 import { registerTools } from "./tools.js";
+import { registerCommands } from "./commands.js";
 
 interface SessionState {
 	handles: HonchoHandles | null;
@@ -247,11 +246,8 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		const state = getState(handles.sessionId);
 		state.messageCount += 1;
 
-		// Extract query from event messages if the harness provides them.
-		const query = (event.messages ?? [])
-			.filter((m) => m.role === "user")
-			.map((m) => extractTextFromMessage(m))
-			.join("\n");
+		// Use event.prompt (the raw user input) for semantic search.
+		const query = event.prompt ?? "";
 		const hasQuery = query.trim().length > 0 && !SKIP_PATTERNS.some((p) => p.test(query.trim()));
 
 		// Prompt context: cached vs fresh fetch (only when meaningful query available).
@@ -280,7 +276,7 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 			}
 		}
 
-		// Always compile and inject base memory context from session_start cache.
+		// Always compile memory context from session_start cache.
 		const compiled = compileMemoryContext(state.lastMemoryBlock ?? {
 			userRepresentation: "", userPeerCard: null,
 			aiRepresentation: "", aiPeerCard: null,
@@ -289,7 +285,8 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		}, promptContext);
 		state.lastMemoryContext = compiled;
 
-		const systemPrompt: string[] = [];
+		// Append to existing system prompt (do NOT replace it — harness base prompt must stay).
+		const systemPrompt = [...event.systemPrompt];
 		if (compiled) systemPrompt.push(compiled);
 
 		// Tool hint on first message only (Claude pattern).
@@ -300,9 +297,8 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		}
 		if (sessionToolHint) systemPrompt.push(sessionToolHint);
 
-		log(`before_agent_start: DONE total=${Date.now() - t0}ms, promptLen=${compiled?.length ?? 0}, hasQuery=${hasQuery}`);
-		if (systemPrompt.length) return { systemPrompt };
-		return {};
+		log(`before_agent_start: DONE total=${Date.now() - t0}ms, promptLen=${systemPrompt.length}, hasQuery=${hasQuery}`);
+		return { systemPrompt };
 	});
 	pi.on("agent_end", async (event: AgentEndEvent, ctx) => {
 		const t0 = Date.now();

@@ -7,3 +7,6 @@
 [submodule "research/pi-honcho-memory"]
 	path = research/pi-honcho-memory
 	url = https://github.com/agneym/pi-honcho-memory.git
+[submodule "research/oh-my-pi"]
+	path = research/oh-my-pi
+	url = https://github.com/can1357/oh-my-pi.git
