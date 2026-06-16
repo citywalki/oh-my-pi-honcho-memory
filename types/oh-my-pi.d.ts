@@ -58,13 +58,14 @@ declare module "@oh-my-pi/pi-coding-agent" {
 
   export type BeforeAgentStartEvent = {
     type: "before_agent_start";
-    messages: AgentMessage[];
+    messages?: AgentMessage[];
   };
 
   export type AgentEndEvent = {
     type: "agent_end";
-    messages: AgentMessage[];
+    messages?: AgentMessage[];
   };
+
 
   export type ToolDefinition<TParams = unknown, TDetails = unknown> = {
     name: string;
