@@ -1,5 +1,5 @@
 {
-  "name": "oh-my-pi-honcho-memory",
+  "name": "@fa-software/oh-my-pi-honcho-memory",
   "version": "0.1.1",
   "type": "module",
   "description": "Honcho multi-developer memory extension for oh-my-pi",
