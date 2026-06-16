@@ -1,0 +1,9 @@
+[submodule "research/claude-honcho"]
+	path = research/claude-honcho
+	url = https://github.com/plastic-labs/claude-honcho.git
+[submodule "research/opencode-honcho"]
+	path = research/opencode-honcho
+	url = https://github.com/plastic-labs/opencode-honcho.git
+[submodule "research/pi-honcho-memory"]
+	path = research/pi-honcho-memory
+	url = https://github.com/agneym/pi-honcho-memory.git

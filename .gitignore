@@ -26,3 +26,4 @@ pnpm-debug.log*
 
 # Open Model Platform local config
 .omp/
+omp-session-*.html
