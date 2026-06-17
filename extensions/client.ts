@@ -56,13 +56,10 @@ export interface HonchoHandles {
 	sessionId: SessionKey;
 	userPeerId: string;
 	aiPeerId: string;
-	projectPeerId: string | null;
 	userPeerName: string;
 	aiPeerName: string;
-	projectPeerName: string | null;
 	userPeer: HonchoPeer;
 	aiPeer: HonchoPeer;
-	projectPeer: HonchoPeer | null;
 	session: HonchoSession;
 	config: HonchoExtensionConfig;
 }
@@ -79,9 +76,6 @@ export async function createHonchoHandles(params: {
 
 	const userPeerId = `user-${params.config.peerName}`;
 	const aiPeerId = `ai-${params.config.aiPeer.replace(/^ai-/, "")}`;
-	const projectPeerId = params.config.projectPeer
-		? `project-${params.config.projectPeer.replace(/^project-/, "")}`
-		: null;
 
 	const [userPeer, aiPeer, session] = await Promise.all([
 		honcho.peer(userPeerId, { configuration: { observeMe: true } }) as Promise<unknown>,
@@ -89,17 +83,10 @@ export async function createHonchoHandles(params: {
 		honcho.session(params.sessionKey) as Promise<unknown>,
 	]);
 
-	const projectPeer = projectPeerId
-		? ((await honcho.peer(projectPeerId, { configuration: { observeMe: true } })) as unknown)
-		: null;
-
 	const peerConfigs: Record<string, { observeMe: boolean; observeOthers: boolean }> = {
 		[userPeerId]: { observeMe: true, observeOthers: false },
 		[aiPeerId]: { observeMe: true, observeOthers: true },
 	};
-	if (projectPeerId) {
-		peerConfigs[projectPeerId] = { observeMe: true, observeOthers: false };
-	}
 
 	const honchoSession = session as HonchoSession;
 	await honchoSession.addPeers(Object.entries(peerConfigs) as [string, { observeMe: boolean; observeOthers: boolean }][]);
@@ -110,13 +97,10 @@ export async function createHonchoHandles(params: {
 		sessionId: params.sessionKey,
 		userPeerId,
 		aiPeerId,
-		projectPeerId,
 		userPeerName: params.config.peerName,
 		aiPeerName: params.config.aiPeer,
-		projectPeerName: params.config.projectPeer ?? null,
 		userPeer: userPeer as HonchoPeer,
 		aiPeer: aiPeer as HonchoPeer,
-		projectPeer: projectPeer as HonchoPeer | null,
 		session: honchoSession,
 		config: params.config,
 	};

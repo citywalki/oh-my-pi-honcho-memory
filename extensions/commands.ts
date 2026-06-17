@@ -1,6 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
 import type { HonchoHandles } from "./client.js";
-import { saveProjectMemory } from "./memory.js";
 import { resolveConfig, isConfigured } from "./config.js";
 
 export interface CommandRegistryDependencies {
@@ -22,7 +21,6 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandRegistryDependen
 				`Session: ${handles.sessionId}`,
 				`Developer peer: ${handles.userPeerId}`,
 				`AI peer: ${handles.aiPeerId}`,
-				`Project peer: ${handles.projectPeerId ?? "(not configured)"}`,
 				`Observation mode: ${handles.config.observationMode}`,
 				`Session strategy: ${handles.config.sessionStrategy}`,
 				`Endpoint: ${handles.config.url}`,
@@ -42,8 +40,6 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandRegistryDependen
 				`workspace: ${config.workspace}`,
 				`peerName: ${config.peerName}`,
 				`aiPeer: ${config.aiPeer}`,
-				`projectPeer: ${config.projectPeer ?? "(not configured)"}`,
-				`sessionStrategy: ${config.sessionStrategy}`,
 				`observationMode: ${config.observationMode}`,
 				`contextTokens: ${config.contextTokens}`,
 				`commitEveryNTurns: ${config.commitEveryNTurns}`,
@@ -74,28 +70,6 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandRegistryDependen
 				`Honcho is configured and connected.\nWorkspace: ${handles.workspaceId}\nSession: ${handles.sessionId}`,
 				"success",
 			);
-		},
-	});
-
-	pi.registerCommand("honcho-save-to-project", {
-		description: "Save a durable fact to the active project peer.",
-		async handler(args, ctx) {
-			const handles = await deps.getHandles(ctx);
-			if (!handles) {
-				ctx.ui.notify("Honcho is not initialized for this session.", "warning");
-				return;
-			}
-			const content = args.join(" ").trim();
-			if (!content) {
-				ctx.ui.notify("Usage: /honcho-save-to-project <fact>", "warning");
-				return;
-			}
-			const result = await saveProjectMemory(handles, content, { source: "command" });
-			if (result.saved) {
-				ctx.ui.notify("Saved to project memory.", "success");
-			} else {
-				ctx.ui.notify(result.error ?? "Failed to save.", "error");
-			}
 		},
 	});
 }

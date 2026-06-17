@@ -1,4 +1,4 @@
-import type { HonchoHandles, HonchoPeer } from "./client.js";
+import type { HonchoHandles } from "./client.js";
 
 export interface MemoryContextBlock {
 	userPeerName: string;
@@ -7,9 +7,6 @@ export interface MemoryContextBlock {
 	aiPeerName: string;
 	aiRepresentation: string;
 	aiPeerCard: string[] | null;
-	projectPeerName: string;
-	projectRepresentation: string;
-	projectPeerCard: string[] | null;
 	summary: string | null;
 }
 
@@ -44,13 +41,10 @@ function parseSessionSummary(value: unknown): string {
 	return typeof value === "string" && value.trim() ? value.trim() : "";
 }
 export async function hydrateMemoryContext(handles: HonchoHandles): Promise<MemoryContextBlock> {
-	const projectPeer = handles.projectPeer;
 
-	const [userCtx, aiCtx, projectCtx, summaries] = await Promise.allSettled([
+	const [userCtx, aiCtx, summaries] = await Promise.allSettled([
 		handles.userPeer.context({ maxConclusions: 12, includeMostFrequent: true }),
 		handles.aiPeer.context({ maxConclusions: 8, includeMostFrequent: true }),
-		projectPeer?.context({ maxConclusions: 12, includeMostFrequent: true }) ??
-			Promise.resolve({ representation: "", peerCard: null }),
 		handles.session.summaries(),
 	]);
 
@@ -60,9 +54,6 @@ export async function hydrateMemoryContext(handles: HonchoHandles): Promise<Memo
 	const aiRepresentation =
 		aiCtx.status === "fulfilled" ? parseRepresentation(aiCtx.value.representation) : "";
 	const aiPeerCard = aiCtx.status === "fulfilled" ? aiCtx.value.peerCard : null;
-	const projectRepresentation =
-		projectCtx.status === "fulfilled" ? parseRepresentation(projectCtx.value.representation) : "";
-	const projectPeerCard = projectCtx.status === "fulfilled" ? projectCtx.value.peerCard : null;
 	const summary =
 		summaries.status === "fulfilled"
 			? parseSessionSummary(summaries.value.shortSummary) ||
@@ -76,9 +67,6 @@ export async function hydrateMemoryContext(handles: HonchoHandles): Promise<Memo
 		aiPeerName: handles.aiPeerName,
 		aiRepresentation,
 		aiPeerCard,
-		projectPeerName: handles.projectPeerName ?? "",
-		projectRepresentation,
-		projectPeerCard,
 		summary,
 	};
 }
@@ -269,11 +257,12 @@ export function formatPeerCardCompact(card: string[] | null): string {
 }
 
 /**
- * Format a single peer's context into a compact inline section.
- * Modeled after Claude Code's `formatCachedContext`.
+ * Format a single peer's context as a structured block with `###` heading.
+ * Observations become bullet points; peer card is the first bullet.
+ * The redundant `peerName ` prefix is stripped from observations.
  */
-function formatCompactPeerBlock(
-	label: string,
+function formatPeerSection(
+	heading: string,
 	peerName: string,
 	representation: string,
 	peerCard: string[] | null,
@@ -281,13 +270,20 @@ function formatCompactPeerBlock(
 ): string | null {
 	const observations = parseObservationLines(representation);
 	const card = formatPeerCardCompact(peerCard);
-	const parts: string[] = [];
-	if (observations.length > 0) {
-		parts.push(observations.slice(0, maxObservations).join("; "));
+	if (observations.length === 0 && !card) return null;
+
+	const lines: string[] = [];
+	lines.push(`### ${heading} (${peerName})`);
+	if (card) {
+		lines.push(`- ${card}`);
 	}
-	if (card) parts.push(card);
-	if (parts.length === 0) return null;
-	return `- **${label}** (${peerName}): ${parts.join(" | ")}`;
+	// Strip redundant "peerName " prefix from each observation
+	const peerPrefix = `${peerName} `;
+	for (const obs of observations.slice(0, maxObservations)) {
+		const cleaned = obs.startsWith(peerPrefix) ? obs.slice(peerPrefix.length) : obs;
+		lines.push(`- ${cleaned}`);
+	}
+	return lines.join("\n");
 }
 
 export function compileMemoryContext(
@@ -296,30 +292,24 @@ export function compileMemoryContext(
 ): string | null {
 	const sections: string[] = [];
 
-	const userSection = formatCompactPeerBlock(
+	const userSection = formatPeerSection(
 		"Developer", block.userPeerName,
 		block.userRepresentation, block.userPeerCard,
 	);
 	if (userSection) sections.push(userSection);
 
-	const aiSection = formatCompactPeerBlock(
+	const aiSection = formatPeerSection(
 		"AI", block.aiPeerName,
 		block.aiRepresentation, block.aiPeerCard, 4,
 	);
 	if (aiSection) sections.push(aiSection);
 
-	const projectSection = formatCompactPeerBlock(
-		"Project", block.projectPeerName,
-		block.projectRepresentation, block.projectPeerCard,
-	);
-	if (projectSection) sections.push(projectSection);
-
 	if (block.summary) {
-		sections.push(`- **Recent**: ${block.summary}`);
+		sections.push(`### Recent\n- ${block.summary}`);
 	}
 
 	if (promptContext) {
-		const promptSection = formatCompactPeerBlock(
+		const promptSection = formatPeerSection(
 			"Relevant", "search",
 			promptContext.representation, promptContext.peerCard, 3,
 		);
@@ -332,7 +322,7 @@ export function compileMemoryContext(
 		"## Honcho Memory",
 		"Use this as persistent developer and project memory. Prefer it over guessing, but only mention it when relevant to the current task.",
 		"",
-		sections.join("\n"),
+		sections.join("\n\n"),
 	].join("\n");
 }
 
@@ -348,9 +338,6 @@ export function formatContinuityContext(
 	lines.push(`Session key: ${handles.sessionId}`);
 	lines.push(`User peer: ${handles.userPeerId}`);
 	lines.push(`AI peer: ${handles.aiPeerId}`);
-	if (handles.projectPeerId) {
-		lines.push(`Project peer: ${handles.projectPeerId}`);
-	}
 
 	if (lastInjectedContext) {
 		lines.push("");
@@ -407,37 +394,6 @@ export async function saveToolSummary(
 	]);
 }
 
-export async function saveProjectMemory(
-	handles: HonchoHandles,
-	content: string,
-	metadata: Record<string, unknown> = {},
-): Promise<{ saved: boolean; error?: string }> {
-	const projectPeer = handles.projectPeer;
-	if (!projectPeer) {
-		return { saved: false, error: "No project peer configured for this directory." };
-	}
-	const trimmed = clampText(content.trim(), 25_000);
-	if (!trimmed) return { saved: false, error: "Empty content." };
-	await handles.session.addMessages([projectPeer.message(trimmed, { metadata })]);
-	return { saved: true };
-}
-
-export async function saveProjectConclusion(
-	handles: HonchoHandles,
-	content: string,
-): Promise<{ saved: boolean; error?: string }> {
-	const projectPeer = handles.projectPeer;
-	if (!projectPeer) {
-		return { saved: false, error: "No project peer configured for this directory." };
-	}
-	const trimmed = clampText(content.trim(), 25_000);
-	if (!trimmed) return { saved: false, error: "Empty content." };
-	await handles.aiPeer.conclusionsOf(projectPeer).create({
-		content: trimmed,
-		sessionId: handles.session.id,
-	});
-	return { saved: true };
-}
 export async function saveUserConclusion(
 	handles: HonchoHandles,
 	content: string,

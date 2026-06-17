@@ -27,7 +27,6 @@ describe("resolveConfig", () => {
 		expect(config.workspace).toBe("oh-my-pi");
 		expect(config.peerName).toBe("user");
 		expect(config.aiPeer).toBe("ai-oh-my-pi");
-		expect(config.projectPeer).toBeNull();
 		expect(config.sessionStrategy).toBe("per-repo");
 		expect(config.observationMode).toBe("unified");
 		expect(config.contextTokens).toBe(1200);
@@ -77,11 +76,10 @@ describe("resolveConfig", () => {
 		mkdirSync(join(dir, ".omp"), { recursive: true });
 		writeFileSync(
 			join(dir, ".omp", "config.yml"),
-			"honcho:\n  peerName: 'User Alice Smith'\n  projectPeer: 'Project: My App'\n",
+			"honcho:\n  peerName: 'User Alice Smith'\n",
 		);
 		const config = resolveConfig(dir);
 		expect(config.peerName).toBe("user-alice-smith");
-		expect(config.projectPeer).toBe("project-my-app");
 	});
 
 	it("expands env in apiKey", () => {

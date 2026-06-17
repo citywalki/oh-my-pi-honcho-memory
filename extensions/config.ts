@@ -17,7 +17,6 @@ export interface HonchoExtensionConfig {
 	workspace: string;
 	peerName: string;
 	aiPeer: string;
-	projectPeer: string | null;
 	sessionStrategy: HonchoSessionStrategy;
 	observationMode: HonchoObservationMode;
 	contextTokens: number;
@@ -35,7 +34,6 @@ const DEFAULTS: HonchoExtensionConfig = {
 	workspace: "oh-my-pi",
 	peerName: "user",
 	aiPeer: "ai-oh-my-pi",
-	projectPeer: null,
 	sessionStrategy: "per-repo",
 	observationMode: "unified",
 	contextTokens: 1200,
@@ -100,7 +98,6 @@ export function resolveConfig(cwd: string): HonchoExtensionConfig {
 		workspace: process.env.HONCHO_WORKSPACE,
 		peerName: process.env.HONCHO_PEER_NAME ?? process.env.HONCHO_USERNAME,
 		aiPeer: process.env.HONCHO_AI_PEER,
-		projectPeer: process.env.HONCHO_PROJECT_PEER,
 	});
 
 	const merged: HonchoExtensionConfig = {
@@ -115,7 +112,6 @@ export function resolveConfig(cwd: string): HonchoExtensionConfig {
 
 	const legacyUsername = (merged as unknown as Record<string, unknown>).username as string | undefined;
 	merged.peerName = normalizePeerName(merged.peerName || legacyUsername || "");
-	if (merged.projectPeer) merged.projectPeer = normalizePeerName(merged.projectPeer);
 
 	return merged;
 }

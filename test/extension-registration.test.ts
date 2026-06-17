@@ -78,12 +78,11 @@ describe("registerCommands", () => {
 		expect(names).toContain("honcho-status");
 		expect(names).toContain("honcho-config");
 		expect(names).toContain("honcho-setup");
-		expect(names).toContain("honcho-save-to-project");
 	});
 
-	it("registers exactly 4 commands", () => {
+	it("registers exactly 3 commands", () => {
 		const { module, registeredCommands } = createMockPi();
 		registerCommands(module as never, { getHandles: async () => null });
-		expect(registeredCommands.length).toBe(4);
+		expect(registeredCommands.length).toBe(3);
 	});
 });

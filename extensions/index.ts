@@ -11,9 +11,6 @@ import {
 	compileMemoryContext,
 	hydrateMemoryContext,
 	refreshPromptContext,
-	saveUserMessage,
-	saveAssistantMessage,
-	saveToolSummary,
 	saveUserConclusion,
 	formatContinuityContext,
 	parseObservationLines,
@@ -198,11 +195,9 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		const t1 = Date.now();
 		const memoryBlock = await hydrateMemoryContextWithTimeout(handles).catch(() => {
 			log(`session_start: hydrate timed out after ${Date.now() - t1}ms`);
-			return { userPeerName: "", userRepresentation: "", userPeerCard: null, aiPeerName: "", aiRepresentation: "", aiPeerCard: null, projectPeerName: "", projectRepresentation: "", projectPeerCard: null, summary: null };
+			return { userPeerName: "", userRepresentation: "", userPeerCard: null, aiPeerName: "", aiRepresentation: "", aiPeerCard: null, summary: null };
 		});
 		log(`session_start: hydrate done in ${Date.now() - t1}ms`);
-		state.lastMemoryBlock = memoryBlock;
-		state.lastMemoryContext = compileMemoryContext(memoryBlock, null);
 		state.memoryReady = true;
 
 		const t2 = Date.now();
@@ -233,9 +228,6 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 			aiPeerName: "",
 			aiRepresentation: "",
 			aiPeerCard: null,
-			projectPeerName: "",
-			projectRepresentation: "",
-			projectPeerCard: null,
 			summary: null,
 		}));
 		state.lastMemoryBlock = memoryBlock;
@@ -272,7 +264,6 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 			return {
 				userPeerName: "", userRepresentation: "", userPeerCard: null,
 				aiPeerName: "", aiRepresentation: "", aiPeerCard: null,
-				projectPeerName: "", projectRepresentation: "", projectPeerCard: null,
 				summary: null,
 			};
 		});
@@ -420,9 +411,6 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 			aiPeerName: "",
 			aiRepresentation: "",
 			aiPeerCard: null,
-			projectPeerName: "",
-			projectRepresentation: "",
-			projectPeerCard: null,
 			summary: null,
 		}));
 		state.lastMemoryBlock = memoryBlock;
