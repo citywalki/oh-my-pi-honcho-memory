@@ -32,17 +32,20 @@ oh-my-pi 下次启动时会自动加载该扩展。
 
 ### 第三步：配置
 
-创建或编辑 `~/.omp/agent/config.yml`：
+创建 `~/.honcho/config.json`：
 
-```yaml
-honcho:
-  enabled: true
-  url: https://api.honcho.dev
-  apiKey: hch-...
-  workspace: fa-dev
-  aiPeer: oh-my-pi
-  peerName: zhangsan
-  sessionStrategy: per-repo
+```json
+{
+  "apiKey": "hch-...",
+  "peerName": "zhangsan",
+  "hosts": {
+    "omp": {
+      "workspace": "fa-dev",
+      "aiPeer": "oh-my-pi"
+    }
+  },
+  "sessionStrategy": "per-repo"
+}
 ```
 
 
@@ -63,26 +66,88 @@ honcho:
 
 ## 配置说明
 
-配置从三个来源合并，后写入的会覆盖前面的：
+配置从五个来源合并，后写入的会覆盖前面的：
 
-1. 全局配置：`~/.omp/agent/config.yml`
-2. 项目配置：`<repo>/.omp/config.yml`
-3. 环境变量（最高优先级）
+1. 默认值（内置）
+2. 全局配置：`~/.omp/agent/config.yml`
+3. 全局独立配置：`~/.honcho-memory.{json,yml,yaml}`
+4. 最近独立配置：从工作目录向上查找的最近 `.honcho-memory.{json,yml,yaml}`
+5. 项目配置：`<cwd>/.omp/config.yml`
+6. 环境变量（最高优先级）
 
-### 全局配置
+### 独立配置文件（推荐）
 
-```yaml
-honcho:
-  enabled: true
-  url: https://api.honcho.dev
-  apiKey: hch-...
-  workspace: fa-dev
-  aiPeer: oh-my-pi
-  peerName: zhangsan
-  sessionStrategy: per-repo
-  contextTokens: 1200
-  commitEveryNTurns: 4
+你可以将 Honcho 配置放在独立文件中，而不是嵌入 `.omp/config.yml`。扩展会从当前工作目录向上搜索配置文件。
+
+支持的文件名（按顺序查找）：
+- `.honcho-memory.json` / `.honcho-memory.yml` / `.honcho-memory.yaml`
+- `honcho-memory.config.json` / `honcho-memory.config.yml` / `honcho-memory.config.yaml`
+
+如需使用自定义文件名，设置 `HONCHO_MEMORY_CONFIG=acp.json`。
+
+```json
+{
+  "enabled": true,
+  "url": "https://api.honcho.dev",
+  "apiKey": "hch-...",
+  "workspace": "fa-dev",
+  "aiPeer": "oh-my-pi",
+  "peerName": "zhangsan",
+  "sessionStrategy": "per-repo",
+  "contextTokens": 1200
+}
 ```
+
+配置项为平铺字段，无需 `honcho:` 嵌套。（如果包含顶层 `honcho` 字段，也会被识别以保持兼容。）YAML 格式同样支持。
+
+### 独立配置文件（推荐）
+
+创建 `~/.honcho/config.json`：
+
+```json
+{
+  "apiKey": "hch-...",
+  "peerName": "zhangsan",
+  "sessionStrategy": "per-repo",
+  "contextTokens": 1200,
+  "hosts": {
+    "omp": {
+      "workspace": "fa-dev",
+      "aiPeer": "oh-my-pi"
+    }
+  }
+}
+```
+
+配置项为平铺字段，无需 `honcho:` 嵌套。与官方 [claude-honcho](https://github.com/plastic-labs/claude-honcho) 插件使用相同格式，可在不同工具间共享一个配置文件。
+
+#### 按目录覆盖
+
+使用 `directories` 块为不同项目配置不同设置（最长路径前缀匹配）：
+
+```json
+{
+  "apiKey": "hch-...",
+  "hosts": {
+    "omp": {
+      "workspace": "default-ws",
+      "aiPeer": "oh-my-pi"
+    }
+  },
+  "directories": {
+    "/Users/me/work/project-a": {
+      "apiKey": "hch-company-key...",
+      "workspace": "company-ws"
+    },
+    "/Users/me/work/project-b": {
+      "apiKey": "hch-personal-key...",
+      "workspace": "personal-ws",
+      "sessionStrategy": "per-directory"
+    }
+  }
+}
+```
+
 
 
 ### 环境变量
@@ -94,6 +159,8 @@ honcho:
 | `HONCHO_WORKSPACE` | Workspace ID |
 | `HONCHO_PEER_NAME` | 开发者 peer 名称 |
 | `HONCHO_AI_PEER` | AI peer 名称 |
+| `HONCHO_MEMORY_CONFIG` | 覆盖独立配置文件路径 |
+| `HONCHO_MEMORY_CONFIG` | 独立配置文件名（默认查找 `.honcho-memory.*`） |
 
 ### 云端 vs 本地
 

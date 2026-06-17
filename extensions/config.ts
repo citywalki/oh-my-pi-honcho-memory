@@ -1,6 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import * as yaml from "js-yaml";
 
 export type HonchoSessionStrategy =
 	| "per-repo"
@@ -44,22 +43,6 @@ const DEFAULTS: HonchoExtensionConfig = {
 	},
 };
 
-function readYaml(path: string): Record<string, unknown> {
-	if (!existsSync(path)) return {};
-	try {
-		const text = readFileSync(path, "utf8");
-		return (yaml.load(text) as Record<string, unknown>) ?? {};
-	} catch {
-		return {};
-	}
-}
-
-function pickHoncho(raw: Record<string, unknown>): Partial<HonchoExtensionConfig> {
-	const honcho = raw.honcho;
-	if (!honcho || typeof honcho !== "object") return {};
-	return honcho as Partial<HonchoExtensionConfig>;
-}
-
 function expandEnv(value: string): string {
 	return value.replace(/\$\{([^}]+)\}/g, (_, key: string) => process.env[key] ?? "");
 }
@@ -68,10 +51,6 @@ function normalizePeerName(name: string): string {
 	const trimmed = name.trim().toLowerCase();
 	const noPrefix = trimmed.replace(/^(user-|project-|ai-)/, "");
 	return noPrefix.replace(/[^a-z0-9_-]+/g, "-").replace(/^-|-$/g, "") || "user";
-}
-
-function userConfigPath(): string {
-	return join(process.env.HOME ?? process.env.USERPROFILE ?? "/tmp", ".omp", "agent", "config.yml");
 }
 
 function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
@@ -84,13 +63,119 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
 	}
 	return result;
 }
+const DEFAULT_HOST = "omp";
+// ============================================
+// Config file: ~/.honcho/config.json
+// Following the official claude-honcho / pi-honcho-memory pattern
+// ============================================
+
+function honchoConfigPath(): string {
+	const home = process.env.HOME ?? process.env.USERPROFILE ?? "/tmp";
+	return join(home, ".honcho", "config.json");
+}
+
+
+/** Per-host / per-directory overrides within config.json */
+interface HonchoScopeConfig {
+	apiKey?: string;
+	url?: string;
+	workspace?: string;
+	aiPeer?: string;
+	sessionStrategy?: HonchoSessionStrategy;
+	observationMode?: HonchoObservationMode;
+	contextTokens?: number;
+	commitEveryNTurns?: number;
+	contextRefresh?: {
+		messageThreshold?: number;
+		ttlSeconds?: number;
+	};
+}
+
+/** Raw shape of ~/.honcho/config.json on disk */
+interface HonchoFileConfig {
+	enabled?: boolean;
+	apiKey?: string;
+	peerName?: string;
+	url?: string;
+	workspace?: string;
+	aiPeer?: string;
+	sessionStrategy?: HonchoSessionStrategy;
+	observationMode?: HonchoObservationMode;
+	contextTokens?: number;
+	commitEveryNTurns?: number;
+	contextRefresh?: {
+		messageThreshold?: number;
+		ttlSeconds?: number;
+	};
+	hosts?: Record<string, HonchoScopeConfig>;
+	/** Per-directory overrides — longest prefix match of absolute path wins */
+	directories?: Record<string, HonchoScopeConfig>;
+}
+
+function readHonchoConfig(): HonchoFileConfig {
+	if (!existsSync(honchoConfigPath())) return {};
+	try {
+		const text = readFileSync(honchoConfigPath(), "utf8");
+		const parsed = JSON.parse(text);
+		if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+			return parsed as HonchoFileConfig;
+		}
+	} catch {}
+	return {};
+}
+
+/**
+ * Find the best matching directory entry for cwd.
+ * Longest absolute-path prefix that is an ancestor of cwd wins.
+ */
+function matchDirectory(
+	cwd: string,
+	directories: Record<string, HonchoScopeConfig>,
+): HonchoScopeConfig {
+	const resolvedCwd = resolve(cwd);
+	let bestMatch: { config: HonchoScopeConfig; path: string } | null = null;
+
+	for (const [key, config] of Object.entries(directories)) {
+		const resolvedKey = resolve(key);
+		if (!resolvedCwd.startsWith(resolvedKey)) continue;
+		// Must be an exact match or a directory boundary (followed by /)
+		if (resolvedCwd.length > resolvedKey.length && resolvedCwd[resolvedKey.length] !== "/") continue;
+		if (!bestMatch || resolvedKey.length > bestMatch.path.length) {
+			bestMatch = { config, path: resolvedKey };
+		}
+	}
+
+	return bestMatch?.config ?? {};
+}
+
+function honchoConfigToPartial(config: HonchoScopeConfig): Partial<HonchoExtensionConfig> {
+	const result: Partial<HonchoExtensionConfig> = stripUndefined({
+		apiKey: config.apiKey,
+		url: config.url,
+		workspace: config.workspace,
+		aiPeer: config.aiPeer,
+		sessionStrategy: config.sessionStrategy,
+		observationMode: config.observationMode,
+		contextTokens: config.contextTokens,
+		commitEveryNTurns: config.commitEveryNTurns,
+	});
+	if (config.contextRefresh) {
+		result.contextRefresh = {
+			messageThreshold: config.contextRefresh.messageThreshold ?? DEFAULTS.contextRefresh.messageThreshold,
+			ttlSeconds: config.contextRefresh.ttlSeconds ?? DEFAULTS.contextRefresh.ttlSeconds,
+		};
+	}
+	return result;
+}
+
+// ============================================
+// Resolve
+// ============================================
 
 export function resolveConfig(cwd: string): HonchoExtensionConfig {
-	const globalRaw = readYaml(userConfigPath());
-	const projectRaw = readYaml(resolve(cwd, ".omp", "config.yml"));
-
-	const globalHoncho = pickHoncho(globalRaw);
-	const projectHoncho = pickHoncho(projectRaw);
+	const honchoFile = readHonchoConfig();
+	const hostScoped = honchoFile.hosts?.[DEFAULT_HOST] ?? {};
+	const dirScoped = matchDirectory(cwd, honchoFile.directories ?? {});
 
 	const envHoncho: Partial<HonchoExtensionConfig> = stripUndefined({
 		apiKey: process.env.HONCHO_API_KEY,
@@ -100,20 +185,37 @@ export function resolveConfig(cwd: string): HonchoExtensionConfig {
 		aiPeer: process.env.HONCHO_AI_PEER,
 	});
 
-	const merged: HonchoExtensionConfig = {
+	// Merge: later sources override earlier ones
+	const merged = {
 		...DEFAULTS,
-		...globalHoncho,
-		...projectHoncho,
+		// Config file global fields
+		...stripUndefined({
+			enabled: honchoFile.enabled,
+			apiKey: honchoFile.apiKey,
+			peerName: honchoFile.peerName,
+			url: honchoFile.url,
+			workspace: honchoFile.workspace,
+			aiPeer: honchoFile.aiPeer,
+			sessionStrategy: honchoFile.sessionStrategy,
+			observationMode: honchoFile.observationMode,
+			contextTokens: honchoFile.contextTokens,
+			commitEveryNTurns: honchoFile.commitEveryNTurns,
+			contextRefresh: honchoFile.contextRefresh,
+		}),
+		// Config file hosts.omp block
+		...honchoConfigToPartial(hostScoped),
+		// Config file directories block
+		...honchoConfigToPartial(dirScoped),
+		// Environment variables (highest precedence)
 		...envHoncho,
 	};
 
 	if (merged.apiKey) merged.apiKey = expandEnv(merged.apiKey);
 	if (merged.url) merged.url = expandEnv(merged.url);
 
-	const legacyUsername = (merged as unknown as Record<string, unknown>).username as string | undefined;
-	merged.peerName = normalizePeerName(merged.peerName || legacyUsername || "");
+	merged.peerName = normalizePeerName(merged.peerName);
 
-	return merged;
+	return merged as HonchoExtensionConfig;
 }
 
 export function isConfigured(config: HonchoExtensionConfig): boolean {

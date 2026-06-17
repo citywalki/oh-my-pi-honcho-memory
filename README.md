@@ -32,17 +32,20 @@ oh-my-pi will discover the extension automatically on next startup.
 
 ### Step 3: Configure
 
-Create or edit `~/.omp/agent/config.yml`:
+Create `~/.honcho/config.json`:
 
-```yaml
-honcho:
-  enabled: true
-  url: https://api.honcho.dev
-  apiKey: hch-...
-  workspace: fa-dev
-  aiPeer: oh-my-pi
-  peerName: zhangsan
-  sessionStrategy: per-repo
+```json
+{
+  "apiKey": "hch-...",
+  "peerName": "zhangsan",
+  "hosts": {
+    "omp": {
+      "workspace": "fa-dev",
+      "aiPeer": "oh-my-pi"
+    }
+  },
+  "sessionStrategy": "per-repo"
+}
 ```
 
 ### Step 4: Verify
@@ -62,26 +65,88 @@ honcho:
 
 ## Configuration
 
-Configuration is resolved from three sources, later sources overriding earlier ones:
+Configuration is resolved from five sources, later sources overriding earlier ones:
 
-1. Global: `~/.omp/agent/config.yml`
-2. Project: `<repo>/.omp/config.yml`
-3. Environment variables (highest precedence)
+1. Defaults (built-in)
+2. Global: `~/.omp/agent/config.yml`
+3. Global dedicated: `~/.honcho-memory.{json,yml,yaml}`
+4. Nearest dedicated: `.honcho-memory.{json,yml,yaml}` nearest to cwd (walks parent directories)
+5. Project: `<cwd>/.omp/config.yml`
+6. Environment variables (highest precedence)
 
-### Global Config
+### Dedicated Config File (Recommended)
 
-```yaml
-honcho:
-  enabled: true
-  url: https://api.honcho.dev
-  apiKey: hch-...
-  workspace: fa-dev
-  aiPeer: oh-my-pi
-  peerName: zhangsan
-  sessionStrategy: per-repo
-  contextTokens: 1200
-  commitEveryNTurns: 4
+Instead of embedding Honcho config inside `.omp/config.yml`, you can place a separate config file directly in any directory. The extension searches upward from the current working directory.
+
+Supported file names (checked in order):
+- `.honcho-memory.json` / `.honcho-memory.yml` / `.honcho-memory.yaml`
+- `honcho-memory.config.json` / `honcho-memory.config.yml` / `honcho-memory.config.yaml`
+
+To use a custom file name, set `HONCHO_MEMORY_CONFIG=acp.json`.
+
+```json
+{
+  "enabled": true,
+  "url": "https://api.honcho.dev",
+  "apiKey": "hch-...",
+  "workspace": "fa-dev",
+  "aiPeer": "oh-my-pi",
+  "peerName": "zhangsan",
+  "sessionStrategy": "per-repo",
+  "contextTokens": 1200
+}
 ```
+
+Keys are flat — no `honcho:` wrapper needed. (If present, a top-level `honcho` key is also recognized for compatibility.) YAML works the same way.
+
+### Dedicated Config File (Recommended)
+
+Create `~/.honcho/config.json`:
+
+```json
+{
+  "apiKey": "hch-...",
+  "peerName": "zhangsan",
+  "sessionStrategy": "per-repo",
+  "contextTokens": 1200,
+  "hosts": {
+    "omp": {
+      "workspace": "fa-dev",
+      "aiPeer": "oh-my-pi"
+    }
+  }
+}
+```
+
+Keys are flat — no `honcho:` wrapper needed. This is the same format used by the official [claude-honcho](https://github.com/plastic-labs/claude-honcho) plugin, so you can share one config file across tools.
+
+#### Per-Directory Overrides
+
+Use the `directories` block to apply different settings per project (longest prefix match wins):
+
+```json
+{
+  "apiKey": "hch-...",
+  "hosts": {
+    "omp": {
+      "workspace": "default-ws",
+      "aiPeer": "oh-my-pi"
+    }
+  },
+  "directories": {
+    "/Users/me/work/project-a": {
+      "apiKey": "hch-company-key...",
+      "workspace": "company-ws"
+    },
+    "/Users/me/work/project-b": {
+      "apiKey": "hch-personal-key...",
+      "workspace": "personal-ws",
+      "sessionStrategy": "per-directory"
+    }
+  }
+}
+```
+
 
 ### Environment Variables
 
@@ -92,6 +157,8 @@ honcho:
 | `HONCHO_WORKSPACE` | Workspace ID |
 | `HONCHO_PEER_NAME` | Developer peer name |
 | `HONCHO_AI_PEER` | AI peer name |
+| `HONCHO_MEMORY_CONFIG` | Override dedicated config file path |
+| `HONCHO_MEMORY_CONFIG` | Dedicated config file name (default: searches for `.honcho-memory.*`) |
 
 ### Cloud vs Local
 
