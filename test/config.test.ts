@@ -22,7 +22,7 @@ describe("resolveConfig", () => {
 
 	it("applies defaults", () => {
 		const config = resolveConfig("/tmp/nonexistent-project");
-		expect(config.enabled).toBe(true);
+		expect(config.enabled).toBe(false);
 		expect(config.url).toBe("https://api.honcho.dev");
 		expect(config.workspace).toBe("oh-my-pi");
 		expect(config.peerName).toBe("user");
@@ -116,7 +116,7 @@ describe("isConfigured", () => {
 	it("returns true when enabled, apiKey and workspace are present", () => {
 		writeFileSync(
 			join(tmpHome, ".omp", "agent", "config.yml"),
-			"honcho:\n  workspace: test-ws\n  apiKey: hch-test\n",
+			"honcho:\n  enabled: true\n  workspace: test-ws\n  apiKey: hch-test\n",
 		);
 		expect(isConfigured(resolveConfig("/tmp"))).toBe(true);
 	});

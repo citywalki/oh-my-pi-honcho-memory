@@ -28,7 +28,7 @@ export interface HonchoExtensionConfig {
 }
 
 const DEFAULTS: HonchoExtensionConfig = {
-	enabled: true,
+	enabled: false,
 	url: "https://api.honcho.dev",
 	apiKey: "",
 	workspace: "oh-my-pi",
