@@ -45,28 +45,19 @@ honcho:
   sessionStrategy: per-repo
 ```
 
-In each project, create `.omp/config.yml` to set the project peer:
-
-```yaml
-honcho:
-  projectPeer: project-sysA-product
-```
-
 ### Step 4: Verify
 
 1. Start oh-my-pi
 2. Run `/honcho-status` to verify the runtime
-3. Run `/honcho-save-to-project We use Zod for runtime validation` to test durable writes
 
 ## What You Get
 
 - **Persistent Memory** - oh-my-pi can retain durable context across sessions
 - **Cloud or Local Deployments** - Use Honcho Cloud or point at a self-hosted or local Honcho instance
 - **Workspace Mapping** - A shared Honcho workspace holds your team or organization
-- **Project Peer Mapping** - Each project maps to a dedicated Honcho peer for isolated project memory
 - **Developer Voice Isolation** - Each developer's observations are captured under their own peer
 - **Session Mapping** - Sessions can be scoped per directory, repo, or globally
-- **Durable Writes** - Save explicit project conclusions and developer observations
+- **Durable Writes** - Save explicit developer observations and conclusions
 - **Memory Retrieval** - Search memory, query Honcho knowledge, and inject relevant context into prompts
 
 ## Configuration
@@ -92,13 +83,6 @@ honcho:
   commitEveryNTurns: 4
 ```
 
-### Project Config
-
-```yaml
-honcho:
-  projectPeer: project-sysA-product
-```
-
 ### Environment Variables
 
 | Variable | Purpose |
@@ -108,7 +92,6 @@ honcho:
 | `HONCHO_WORKSPACE` | Workspace ID |
 | `HONCHO_PEER_NAME` | Developer peer name |
 | `HONCHO_AI_PEER` | AI peer name |
-| `HONCHO_PROJECT_PEER` | Active project peer name |
 
 ### Cloud vs Local
 
@@ -139,23 +122,19 @@ Everything in Honcho is a peer:
 workspace: fa-dev
 ├── peer: user-zhangsan
 ├── peer: user-lisi
-├── peer: project-sysA-product
-├── peer: project-sysA-clientA
 └── peer: ai-oh-my-pi
 ```
 
 - `user-{developer}` - captures each developer's voice and observations
-- `project-{id}` - captures team conventions and project decisions
 - `ai-oh-my-pi` - the assistant identity that observes and reasons
 
-Conversational turns are automatically saved under the current `user-{developer}` peer. Project knowledge is only written when explicitly saved.
+Conversational turns are automatically saved under the current `user-{developer}` peer.
 
 ## Commands
 
 | Command | Description |
 | --- | --- |
 | `/honcho-status` | Show effective Honcho status for the current oh-my-pi project, including live workspace and session names |
-| `/honcho-save-to-project <fact>` | Save a durable fact to the active project peer |
 
 ## Tools
 
@@ -163,9 +142,9 @@ The extension exposes these tools inside oh-my-pi:
 
 | Tool | Description |
 | --- | --- |
-| `honcho_search` | Search Honcho session messages across developer and project peers |
+| `honcho_search` | Search Honcho session messages across developer peers |
 | `honcho_chat` | Query Honcho for reasoning-backed context |
-| `honcho_remember` | Save a durable memory conclusion to the developer or project peer |
+| `honcho_remember` | Save a durable memory conclusion to the developer peer |
 
 ## Development
 

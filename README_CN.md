@@ -45,28 +45,20 @@ honcho:
   sessionStrategy: per-repo
 ```
 
-在每个项目中创建 `.omp/config.yml` 设置项目 peer：
-
-```yaml
-honcho:
-  projectPeer: project-sysA-product
-```
 
 ### 第四步：验证
 
 1. 启动 oh-my-pi
 2. 运行 `/honcho-status` 验证运行时状态
-3. 运行 `/honcho-save-to-project 我们用 Zod 做运行时校验` 测试持久化写入
 
 ## 功能特性
 
 - **持久化记忆** - oh-my-pi 可以跨会话保留长期上下文
 - **云端或本地部署** - 使用 Honcho Cloud，或指向自托管/本地 Honcho 实例
 - **工作空间映射** - 一个共享的 Honcho workspace 承载团队或组织
-- **项目 Peer 映射** - 每个项目对应一个独立的 Honcho peer，项目记忆相互隔离
 - **开发者声音隔离** - 每个开发者的观察记录在自己的 peer 下
 - **会话映射** - 支持按目录、仓库或全局范围划分会话
-- **持久化写入** - 保存明确的项目结论和开发者观察
+- **持久化写入** - 保存明确的开发者观察
 - **记忆检索** - 搜索记忆、查询 Honcho 知识，并将相关上下文注入提示词
 
 ## 配置说明
@@ -92,12 +84,6 @@ honcho:
   commitEveryNTurns: 4
 ```
 
-### 项目配置
-
-```yaml
-honcho:
-  projectPeer: project-sysA-product
-```
 
 ### 环境变量
 
@@ -108,7 +94,6 @@ honcho:
 | `HONCHO_WORKSPACE` | Workspace ID |
 | `HONCHO_PEER_NAME` | 开发者 peer 名称 |
 | `HONCHO_AI_PEER` | AI peer 名称 |
-| `HONCHO_PROJECT_PEER` | 当前项目 peer 名称 |
 
 ### 云端 vs 本地
 
@@ -139,33 +124,28 @@ honcho:
 workspace: fa-dev
 ├── peer: user-zhangsan
 ├── peer: user-lisi
-├── peer: project-sysA-product
-├── peer: project-sysA-clientA
 └── peer: ai-oh-my-pi
 ```
 
 - `user-{developer}` - 记录每个开发者的声音和观察
-- `project-{id}` - 记录团队约定和项目决策
 - `ai-oh-my-pi` - 助理身份，负责观察和推理
 
-对话回合会自动保存到当前的 `user-{developer}` peer。项目知识仅在显式保存时写入。
+对话回合会自动保存到当前的 `user-{developer}` peer。
 
 ## 命令
 
 | 命令 | 说明 |
 | --- | --- |
 | `/honcho-status` | 显示当前 oh-my-pi 项目的 Honcho 状态，包括 workspace 和 session 名称 |
-| `/honcho-save-to-project <事实>` | 将一条持久化事实保存到当前项目 peer |
-
 ## 工具
 
 扩展向 oh-my-pi 暴露了以下工具：
 
 | 工具 | 说明 |
 | --- | --- |
-| `honcho_search` | 跨开发者和项目 peer 搜索 Honcho 会话消息 |
+| `honcho_search` | 搜索开发者和 AI peer 的 Honcho 会话消息和记忆 |
 | `honcho_chat` | 向 Honcho 查询基于推理的上下文 |
-| `honcho_remember` | 将持久化结论保存到开发者或项目 peer |
+| `honcho_remember` | 将持久化结论保存到开发者 peer |
 
 ## 本地开发
 
