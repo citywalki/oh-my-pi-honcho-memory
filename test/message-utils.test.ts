@@ -100,6 +100,23 @@ describe("collectMessagePairs", () => {
 			{ role: "assistant", content: "hello" },
 		]);
 	});
+	it("skips assistant messages that carry tool calls", () => {
+		const pairs = collectMessagePairs([
+			{ role: "user", content: "read file" },
+			{
+				role: "assistant",
+				content: [
+					{ type: "text", text: "." },
+					{ type: "toolCall", name: "read", arguments: {} },
+				],
+			},
+			{ role: "assistant", content: "Here is the file content." },
+		]);
+		expect(pairs).toEqual([
+			{ role: "user", content: "read file" },
+			{ role: "assistant", content: "Here is the file content." },
+		]);
+	});
 
 	it("returns empty array for undefined input", () => {
 		expect(collectMessagePairs(undefined)).toEqual([]);

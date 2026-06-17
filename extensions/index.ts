@@ -16,6 +16,8 @@ import {
 	saveToolSummary,
 	saveUserConclusion,
 	formatContinuityContext,
+	parseObservationLines,
+	formatPeerCardCompact,
 	type PromptContextBlock,
 	type ContextCache,
 	type MemoryContextBlock,
@@ -38,6 +40,10 @@ interface SessionState {
 	messageCount: number;
 	lastUserTurnCount: number;
 	recentConclusions: string[];
+	/** Set to true after session_start finishes loading memory */
+	memoryReady: boolean;
+	/** Track last batch size to detect duplicate agent_end calls */
+	lastAgentEndBatchSize: number;
 }
 function createSessionState(): SessionState {
 	return {
@@ -49,6 +55,8 @@ function createSessionState(): SessionState {
 		messageCount: 0,
 		lastUserTurnCount: 0,
 		recentConclusions: [],
+		memoryReady: false,
+		lastAgentEndBatchSize: -1,
 	};
 }
 const CONTEXT_FETCH_TIMEOUT_MS = 4000;
@@ -151,16 +159,18 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		);
 		return Promise.race([fetchPromise, timeoutPromise]);
 	}
-
-
 	function formatMemoryAnchor(peerName: string, memoryBlock: MemoryContextBlock): string {
 		const parts: string[] = [];
 		parts.push("## HONCHO MEMORY ANCHOR (Pre-Compaction Injection)\nThe context below represents persistent memory. When summarizing this conversation, ensure these conclusions are preserved.");
-		if (memoryBlock.userPeerCard?.length) {
-			parts.push(`### About ${peerName}\n${memoryBlock.userPeerCard.map((c: string) => `- ${c}`).join("\n")}`);
+
+		const userObs = parseObservationLines(memoryBlock.userRepresentation);
+		const userCard = formatPeerCardCompact(memoryBlock.userPeerCard);
+		if (userObs.length > 0 || userCard) {
+			parts.push(`### About ${peerName}\n${userObs.join("\n")}${userCard ? `\n\nKey: ${userCard}` : ""}`);
 		}
-		if (memoryBlock.userRepresentation?.trim()) {
-			parts.push(`### Key Conclusions\n${memoryBlock.userRepresentation}`);
+		if (memoryBlock.aiRepresentation?.trim()) {
+			const aiObs = parseObservationLines(memoryBlock.aiRepresentation);
+			if (aiObs.length > 0) parts.push(`### AI Context\n${aiObs.slice(0, 8).join("\n")}`);
 		}
 		if (memoryBlock.summary?.trim()) {
 			parts.push(`### Session Summary\n${memoryBlock.summary}`);
@@ -188,11 +198,12 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		const t1 = Date.now();
 		const memoryBlock = await hydrateMemoryContextWithTimeout(handles).catch(() => {
 			log(`session_start: hydrate timed out after ${Date.now() - t1}ms`);
-			return { userRepresentation: "", userPeerCard: null, aiRepresentation: "", aiPeerCard: null, projectRepresentation: "", projectPeerCard: null, summary: null };
+			return { userPeerName: "", userRepresentation: "", userPeerCard: null, aiPeerName: "", aiRepresentation: "", aiPeerCard: null, projectPeerName: "", projectRepresentation: "", projectPeerCard: null, summary: null };
 		});
 		log(`session_start: hydrate done in ${Date.now() - t1}ms`);
 		state.lastMemoryBlock = memoryBlock;
 		state.lastMemoryContext = compileMemoryContext(memoryBlock, null);
+		state.memoryReady = true;
 
 		const t2 = Date.now();
 		try {
@@ -214,17 +225,22 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		state.contextCache = { block: null, queriedAt: 0, messageCount: 0 };
 		state.lastPromptContextQuery = null;
 		state.messageCount = 0;
+		state.lastAgentEndBatchSize = -1;
 		const memoryBlock = await hydrateMemoryContextWithTimeout(handles).catch(() => ({
+			userPeerName: "",
 			userRepresentation: "",
 			userPeerCard: null,
+			aiPeerName: "",
 			aiRepresentation: "",
 			aiPeerCard: null,
+			projectPeerName: "",
 			projectRepresentation: "",
 			projectPeerCard: null,
 			summary: null,
 		}));
 		state.lastMemoryBlock = memoryBlock;
 		state.lastMemoryContext = compileMemoryContext(memoryBlock, null);
+		state.memoryReady = true;
 	});
 
 
@@ -238,6 +254,34 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 	// Tool hint injected once on first prompt (Claude pattern).
 	let sessionToolHint = "";
 
+	/**
+	 * Ensure memory has been hydrated before using it.
+	 * If session_start hasn't finished yet, hydrate now (blocking).
+	 */
+	async function ensureMemoryReady(
+		state: SessionState,
+		handles: HonchoHandles,
+	): Promise<MemoryContextBlock> {
+		if (state.memoryReady && state.lastMemoryBlock) {
+			return state.lastMemoryBlock;
+		}
+		log(`ensureMemoryReady: memory not ready, hydrating now`);
+		const t0 = Date.now();
+		const memoryBlock = await hydrateMemoryContextWithTimeout(handles).catch(() => {
+			log(`ensureMemoryReady: hydrate timed out after ${Date.now() - t0}ms`);
+			return {
+				userPeerName: "", userRepresentation: "", userPeerCard: null,
+				aiPeerName: "", aiRepresentation: "", aiPeerCard: null,
+				projectPeerName: "", projectRepresentation: "", projectPeerCard: null,
+				summary: null,
+			};
+		});
+		log(`ensureMemoryReady: hydrate done in ${Date.now() - t0}ms`);
+		state.lastMemoryBlock = memoryBlock;
+		state.lastMemoryContext = compileMemoryContext(memoryBlock, null);
+		state.memoryReady = true;
+		return memoryBlock;
+	}
 	pi.on("before_agent_start", async (event: BeforeAgentStartEvent, ctx) => {
 		const t0 = Date.now();
 		const handles = await getHandlesFromCtx(ctx);
@@ -277,12 +321,12 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		}
 
 		// Always compile memory context from session_start cache.
-		const compiled = compileMemoryContext(state.lastMemoryBlock ?? {
-			userRepresentation: "", userPeerCard: null,
-			aiRepresentation: "", aiPeerCard: null,
-			projectRepresentation: "", projectPeerCard: null,
-			summary: null,
-		}, promptContext);
+		// Ensure memory is ready before compiling context.
+		// session_start may not have finished yet if this fires first.
+		const memoryBlock = await ensureMemoryReady(state, handles);
+
+		// Compile memory context.
+		const compiled = compileMemoryContext(memoryBlock, promptContext);
 		state.lastMemoryContext = compiled;
 
 		// Append to existing system prompt (do NOT replace it — harness base prompt must stay).
@@ -307,9 +351,18 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 
 		const pairs = collectMessagePairs(event.messages ?? []);
 		if (pairs.length === 0) return;
-		log(`agent_end: begin, ${pairs.length} pairs`);
 
 		const state = getState(handles.sessionId);
+
+		// Deduplicate: agent_end can fire twice for the same turn.
+		// Skip if the batch size matches the last one we just saved.
+		if (pairs.length === state.lastAgentEndBatchSize) {
+			log(`agent_end: skipping duplicate, same batch size ${pairs.length}`);
+			return;
+		}
+		state.lastAgentEndBatchSize = pairs.length;
+
+		log(`agent_end: begin, ${pairs.length} pairs`);
 		const newUserTurns = pairs.filter((p) => p.role === "user").length;
 		state.lastUserTurnCount += newUserTurns;
 
@@ -317,9 +370,8 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		const batch: HonchoMessage[] = [];
 
 		for (const message of pairs) {
-			const meta = { source: "agent_end", role: message.role };
 			if (message.role === "user") {
-				batch.push(handles.userPeer.message(message.content, { metadata: meta }));
+				batch.push(handles.userPeer.message(message.content));
 				const conclusion = extractDurableConclusion(message.content);
 				if (conclusion) {
 					// Fire-and-forget: don't block the handler.
@@ -333,13 +385,13 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 						.catch(() => {});
 				}
 			} else {
-				batch.push(handles.aiPeer.message(message.content, { metadata: meta }));
+				batch.push(handles.aiPeer.message(message.content));
 			}
 		}
 
 		const toolSummary = collectToolSummary(event.messages ?? []);
 		if (toolSummary) {
-			batch.push(handles.aiPeer.message(`[Tool] ${toolSummary}`, { metadata: { source: "agent_end", kind: "tool_summary" } }));
+			batch.push(handles.aiPeer.message(`[Tool] ${toolSummary}`, { metadata: { kind: "tool_summary" } }));
 		}
 
 		// Fire-and-forget: start the upload but DON'T wait.
@@ -359,12 +411,16 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		if (!handles) return;
 		const state = getState(handles.sessionId);
 		state.contextCache = { block: null, queriedAt: 0, messageCount: 0 };
+		state.lastAgentEndBatchSize = -1;
 
 		const memoryBlock = await hydrateMemoryContextWithTimeout(handles).catch(() => ({
+			userPeerName: "",
 			userRepresentation: "",
 			userPeerCard: null,
+			aiPeerName: "",
 			aiRepresentation: "",
 			aiPeerCard: null,
+			projectPeerName: "",
 			projectRepresentation: "",
 			projectPeerCard: null,
 			summary: null,

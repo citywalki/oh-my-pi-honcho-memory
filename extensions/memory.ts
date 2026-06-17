@@ -1,10 +1,13 @@
 import type { HonchoHandles, HonchoPeer } from "./client.js";
 
 export interface MemoryContextBlock {
+	userPeerName: string;
 	userRepresentation: string;
 	userPeerCard: string[] | null;
+	aiPeerName: string;
 	aiRepresentation: string;
 	aiPeerCard: string[] | null;
+	projectPeerName: string;
 	projectRepresentation: string;
 	projectPeerCard: string[] | null;
 	summary: string | null;
@@ -67,10 +70,13 @@ export async function hydrateMemoryContext(handles: HonchoHandles): Promise<Memo
 			: null;
 
 	return {
+		userPeerName: handles.userPeerName,
 		userRepresentation,
 		userPeerCard,
+		aiPeerName: handles.aiPeerName,
 		aiRepresentation,
 		aiPeerCard,
+		projectPeerName: handles.projectPeerName ?? "",
 		projectRepresentation,
 		projectPeerCard,
 		summary,
@@ -221,22 +227,67 @@ export function extractTopics(prompt: string): string[] {
 	const words = prompt.toLowerCase().match(/\b[a-z]{4,}\b/g) || [];
 	return [...new Set(words.filter((w) => !stopwords.has(w)))].slice(0, 10);
 }
+/**
+ * Parse Honcho's representation string into clean observation lines.
+ * Honcho wraps output in `## Explicit Observations` / `Key facts:` sections
+ * with timestamps. We strip those and return only the core text.
+ */
+export function parseObservationLines(raw: string): string[] {
+	if (!raw.trim()) return [];
+	const lines: string[] = [];
+	let inObservations = false;
+	let seenHonchoFormat = false;
+	for (const line of raw.split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed) continue;
+		// Skip Honcho section headers
+		if (trimmed.startsWith("## ") || trimmed.startsWith("# ")) {
+			seenHonchoFormat = true;
+			inObservations = trimmed.toLowerCase().includes("observation");
+			continue;
+		}
+		if (trimmed.startsWith("Key facts:")) break;
+		// Strip timestamp prefix: [YYYY-MM-DD HH:MM:SS]
+		const cleaned = trimmed.replace(/^\[\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\]\s*/, "");
+		if (cleaned) lines.push(cleaned);
+	}
+	// If no Honcho structured format detected, treat the entire text as observations
+	if (!seenHonchoFormat) {
+		return raw.split("\n").map((l) => l.trim()).filter(Boolean);
+	}
+	return lines;
+}
 
-function formatPeerContextBlock(
-	heading: string,
+export function formatPeerCardCompact(card: string[] | null): string {
+	if (!card || card.length === 0) return "";
+	// Include all entries; strip role prefixes from ones that have them.
+	const cleaned = card.map((c) => {
+		// Strip common Honcho prefixes: IDENTITY:, ATTRIBUTE:, INSTRUCTION:, ROLE:, RELATIONSHIP:
+		return c.replace(/^(?:IDENTITY|ATTRIBUTE|INSTRUCTION|ROLE|RELATIONSHIP):\s*/, "");
+	});
+	return cleaned.join(" · ");
+}
+
+/**
+ * Format a single peer's context into a compact inline section.
+ * Modeled after Claude Code's `formatCachedContext`.
+ */
+function formatCompactPeerBlock(
+	label: string,
+	peerName: string,
 	representation: string,
 	peerCard: string[] | null,
+	maxObservations: number = 5,
 ): string | null {
-	const lines: string[] = [];
-	if (representation) lines.push(representation);
-	if (peerCard && peerCard.length > 0) {
-		lines.push("Key facts:");
-		for (const fact of peerCard) {
-			lines.push(`- ${fact}`);
-		}
+	const observations = parseObservationLines(representation);
+	const card = formatPeerCardCompact(peerCard);
+	const parts: string[] = [];
+	if (observations.length > 0) {
+		parts.push(observations.slice(0, maxObservations).join("; "));
 	}
-	if (lines.length === 0) return null;
-	return `${heading}\n${lines.join("\n")}`;
+	if (card) parts.push(card);
+	if (parts.length === 0) return null;
+	return `- **${label}** (${peerName}): ${parts.join(" | ")}`;
 }
 
 export function compileMemoryContext(
@@ -245,26 +296,35 @@ export function compileMemoryContext(
 ): string | null {
 	const sections: string[] = [];
 
-	const userBlock = formatPeerContextBlock("## Developer Memory", block.userRepresentation, block.userPeerCard);
-	if (userBlock) sections.push(userBlock);
-
-	const aiBlock = formatPeerContextBlock("## Agent Work Context", block.aiRepresentation, block.aiPeerCard);
-	if (aiBlock) sections.push(aiBlock);
-
-	const projectBlock = formatPeerContextBlock(
-		"## Project Memory",
-		block.projectRepresentation,
-		block.projectPeerCard,
+	const userSection = formatCompactPeerBlock(
+		"Developer", block.userPeerName,
+		block.userRepresentation, block.userPeerCard,
 	);
-	if (projectBlock) sections.push(projectBlock);
+	if (userSection) sections.push(userSection);
 
-	if (block.summary) sections.push(`## Recent Session Summary\n${block.summary}`);
-	const promptBlock = formatPeerContextBlock(
-		"## Relevant Memory",
-		promptContext?.representation ?? "",
-		promptContext?.peerCard ?? null,
+	const aiSection = formatCompactPeerBlock(
+		"AI", block.aiPeerName,
+		block.aiRepresentation, block.aiPeerCard, 4,
 	);
-	if (promptBlock) sections.push(promptBlock);
+	if (aiSection) sections.push(aiSection);
+
+	const projectSection = formatCompactPeerBlock(
+		"Project", block.projectPeerName,
+		block.projectRepresentation, block.projectPeerCard,
+	);
+	if (projectSection) sections.push(projectSection);
+
+	if (block.summary) {
+		sections.push(`- **Recent**: ${block.summary}`);
+	}
+
+	if (promptContext) {
+		const promptSection = formatCompactPeerBlock(
+			"Relevant", "search",
+			promptContext.representation, promptContext.peerCard, 3,
+		);
+		if (promptSection) sections.push(promptSection);
+	}
 
 	if (sections.length === 0) return null;
 
@@ -272,7 +332,7 @@ export function compileMemoryContext(
 		"## Honcho Memory",
 		"Use this as persistent developer and project memory. Prefer it over guessing, but only mention it when relevant to the current task.",
 		"",
-		sections.join("\n\n"),
+		sections.join("\n"),
 	].join("\n");
 }
 

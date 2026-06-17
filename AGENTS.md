@@ -162,19 +162,60 @@ omp install ./
 
 ## Testing & QA
 
-- **本仓库暂无自动化测试**。
+- **单元测试**：`bun test test/`（当前覆盖 memory、config、session-key、message-utils、extension-registration、observation-mode）
 - 质量门禁：
   1. `bun run check` —— TypeScript 类型检查（`tsc --noEmit`）
   2. `bun run build` —— Bun 打包 + 类型声明输出
-- CI 在每次推送到 `main` 分支或针对 `main` 的 PR 上运行上述两项门禁（见 `.github/workflows/ci.yml`）。
-- 手动验证步骤（来自 README）：
-  1. 启动 oh-my-pi。
-  2. 运行 `/honcho-status` 验证初始化状态。
-  3. 运行 `/honcho-save-to-project <fact>` 测试持久化写入。
+  3. `bun test test/` —— 单元测试
+- CI 在每次推送到 `main` 分支或针对 `main` 的 PR 上运行上述门禁（见 `.github/workflows/ci.yml`）。
 
-修改代码后，本地应至少执行：
+### 本地测试步骤
+
+修改代码后，先跑门禁：
 
 ```bash
 bun run check
 bun run build
+bun test test/
 ```
+
+加载到 oh-my-pi 验证（按 omp 扩展编写规范，三种等价方式任选其一）：
+
+**方式一：安装为插件（推荐，支持文件监听热更新）**
+
+```bash
+bun run build
+omp install ./          # 全局安装
+omp install -l ./       # 或仅当前项目（-l / --local）
+```
+
+**方式二：一次会话挂载**
+
+```bash
+bun run build
+omp --extension ./
+```
+
+**方式三：配置文件指向目录**
+
+在 `~/.omp/agent/config.yml` 中添加：
+
+```yaml
+extensions:
+  - /path/to/oh-my-pi-honcho-memory
+```
+
+确认加载成功：
+
+```bash
+omp -p '/extensions'              # 查看已加载的扩展列表
+omp --log-level debug              # 启动时可看到各 surface 的加载日志
+```
+
+### 手动功能验证
+
+1. 启动 oh-my-pi
+2. 运行 `/honcho-status` 验证初始化状态
+3. 运行 `/honcho-save-to-project <fact>` 测试持久化写入
+4. 运行 `/honcho-save-to-user <fact>` 测试用户记忆写入
+5. 检查 AI 是否能通过 `honcho_search` 召回已写入的记忆

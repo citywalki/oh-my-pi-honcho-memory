@@ -57,6 +57,9 @@ export interface HonchoHandles {
 	userPeerId: string;
 	aiPeerId: string;
 	projectPeerId: string | null;
+	userPeerName: string;
+	aiPeerName: string;
+	projectPeerName: string | null;
 	userPeer: HonchoPeer;
 	aiPeer: HonchoPeer;
 	projectPeer: HonchoPeer | null;
@@ -108,6 +111,9 @@ export async function createHonchoHandles(params: {
 		userPeerId,
 		aiPeerId,
 		projectPeerId,
+		userPeerName: params.config.peerName,
+		aiPeerName: params.config.aiPeer,
+		projectPeerName: params.config.projectPeer ?? null,
 		userPeer: userPeer as HonchoPeer,
 		aiPeer: aiPeer as HonchoPeer,
 		projectPeer: projectPeer as HonchoPeer | null,

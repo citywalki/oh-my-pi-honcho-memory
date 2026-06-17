@@ -4,10 +4,13 @@ import type { MemoryContextBlock } from "../extensions/memory.js";
 
 describe("compileMemoryContext", () => {
 	const fullBlock: MemoryContextBlock = {
+		userPeerName: "test-user",
 		userRepresentation: "The user prefers concise engineering analysis.",
-		userPeerCard: ["Keep changes narrowly scoped.", "Prefers TypeScript."],
+		userPeerCard: ["IDENTITY: Name: tester", "INSTRUCTION: Use English only.", "ATTRIBUTE: Employer: FA"],
+		aiPeerName: "ai-test",
 		aiRepresentation: "The assistant is methodical.",
-		aiPeerCard: ["Documents rationale in comments."],
+		aiPeerCard: ["ROLE: Assistant", "Documents rationale in comments."],
+		projectPeerName: "test-project",
 		projectRepresentation: "This project values small PRs.",
 		projectPeerCard: ["MIT license."],
 		summary: "Recent work focused on Honcho memory.",
@@ -17,10 +20,13 @@ describe("compileMemoryContext", () => {
 		expect(
 			compileMemoryContext(
 				{
+					userPeerName: "",
 					userRepresentation: "",
 					userPeerCard: null,
+					aiPeerName: "",
 					aiRepresentation: "",
 					aiPeerCard: null,
+					projectPeerName: "",
 					projectRepresentation: "",
 					projectPeerCard: null,
 					summary: null,
@@ -30,16 +36,18 @@ describe("compileMemoryContext", () => {
 		).toBeNull();
 	});
 
-	it("includes all memory sections when present", () => {
+	it("includes all memory sections in compact format", () => {
 		const compiled = compileMemoryContext(fullBlock, null);
 		expect(compiled).not.toBeNull();
-		expect(compiled).toContain("## Developer Memory");
-		expect(compiled).toContain("## Agent Work Context");
-		expect(compiled).toContain("## Project Memory");
-		expect(compiled).toContain("## Recent Session Summary");
+		expect(compiled).toContain("## Honcho Memory");
+		expect(compiled).toContain("Developer");
+		expect(compiled).toContain("AI");
+		expect(compiled).toContain("Project");
+		expect(compiled).toContain("Recent");
 		expect(compiled).toContain("The user prefers concise engineering analysis.");
-		expect(compiled).toContain("Keep changes narrowly scoped.");
-		expect(compiled).toContain("Documents rationale in comments.");
+		expect(compiled).toContain("Name: tester");
+		expect(compiled).toContain("Use English only.");
+		expect(compiled).toContain("Assistant");
 	});
 
 	it("appends prompt context when provided", () => {
@@ -48,7 +56,7 @@ describe("compileMemoryContext", () => {
 			peerCard: null,
 		};
 		const compiled = compileMemoryContext(fullBlock, promptContext);
-		expect(compiled).toContain("## Relevant Memory");
+		expect(compiled).toContain("Relevant");
 		expect(compiled).toContain("Prompt-specific memory.");
 	});
 
@@ -58,7 +66,7 @@ describe("compileMemoryContext", () => {
 			peerCard: ["This rule matters."],
 		};
 		const compiled = compileMemoryContext(fullBlock, promptContext);
-		expect(compiled).toContain("## Relevant Memory");
+		expect(compiled).toContain("Relevant");
 		expect(compiled).toContain("This rule matters.");
 	});
 
@@ -74,10 +82,10 @@ describe("compileMemoryContext", () => {
 			},
 			null,
 		);
-		expect(compiled).not.toContain("## Agent Work Context");
-		expect(compiled).not.toContain("## Project Memory");
-		expect(compiled).not.toContain("## Recent Session Summary");
-		expect(compiled).toContain("## Developer Memory");
+		expect(compiled).not.toContain("**AI**");
+		expect(compiled).not.toContain("**Project**");
+		expect(compiled).not.toContain("**Recent**");
+		expect(compiled).toContain("Developer");
 	});
 });
 

@@ -48,6 +48,20 @@ export interface MessagePair {
 	content: string;
 }
 
+/**
+ * Check if a message content array contains tool_call entries.
+ * Used to filter out intermediate tool-execution assistant turns.
+ */
+function hasToolCalls(content: unknown): boolean {
+	if (!Array.isArray(content)) return false;
+	return content.some(
+		(part): part is { type: string } =>
+			typeof part === "object" &&
+			part !== null &&
+			"type" in part &&
+			part.type === "toolCall",
+	);
+}
 export function collectMessagePairs(
 	messages: Array<{ role: string; content?: unknown }> | undefined,
 ): MessagePair[] {
@@ -56,8 +70,13 @@ export function collectMessagePairs(
 	for (const message of messages) {
 		const text = extractTextFromMessage(message);
 		if (!text) continue;
-		if (message.role === "user" || message.role === "assistant") {
-			pairs.push({ role: message.role, content: text });
+		if (message.role === "user") {
+			pairs.push({ role: "user", content: text });
+		} else if (message.role === "assistant") {
+			// Skip assistant messages that carry tool calls — these are
+			// intermediate tool-execution turns, not actual conversation.
+			if (hasToolCalls(message.content)) continue;
+			pairs.push({ role: "assistant", content: text });
 		}
 	}
 	return pairs;
