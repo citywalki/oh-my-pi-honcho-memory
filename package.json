@@ -1,6 +1,6 @@
 {
   "name": "@citywalki/oh-my-pi-honcho-memory",
-  "version": "0.1.13",
+  "version": "0.2.0",
   "type": "module",
   "description": "Honcho multi-developer memory extension for oh-my-pi",
   "license": "MIT",
