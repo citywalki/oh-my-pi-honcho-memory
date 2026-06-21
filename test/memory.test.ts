@@ -134,7 +134,7 @@ describe("extractTopics", () => {
 describe("formatContinuityContext", () => {
 	const mockHandles = {
 		workspaceId: "ws-test",
-		sessionId: "per-repo:demo",
+		sessionId: "user-demo",
 		userPeerId: "user-dev",
 		aiPeerId: "ai-dev",
 	} as never;
@@ -143,7 +143,7 @@ describe("formatContinuityContext", () => {
 		const ctx = formatContinuityContext(mockHandles, null, []);
 		expect(ctx).toContain("## Honcho Continuity");
 		expect(ctx).toContain("Workspace: ws-test");
-		expect(ctx).toContain("Session key: per-repo:demo");
+		expect(ctx).toContain("Session key: user-demo");
 		expect(ctx).toContain("User peer: user-dev");
 		expect(ctx).toContain("AI peer: ai-dev");
 	});

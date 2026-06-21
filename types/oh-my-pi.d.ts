@@ -32,6 +32,7 @@ declare module "@oh-my-pi/pi-coding-agent" {
         message: string,
         options: { items: Array<{ label: string; value: T }> },
       ): Promise<T | null>;
+      setStatus(key: string, text: string | undefined): void;
     };
     models: {
       list(): Array<unknown>;

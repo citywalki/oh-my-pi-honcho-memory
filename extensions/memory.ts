@@ -1,4 +1,27 @@
-import type { HonchoHandles } from "./client.js";
+import type { HonchoHandles, HonchoMessage } from "./client.js";
+
+// --- Async save queue: serializes Honcho uploads so multiple agent_end
+// events do not issue concurrent addMessages calls. Boundaries such as
+// session switch / compact / shutdown await flushPending() to ensure
+// all queued uploads complete before the session state changes.
+let pendingSave: Promise<void> = Promise.resolve();
+
+const enqueue = (fn: () => Promise<void>): Promise<void> => {
+	pendingSave = pendingSave.then(fn, () => fn());
+	return pendingSave;
+};
+
+export const flushPending = (): Promise<void> => pendingSave;
+
+export function queueMessageBatch(
+	handles: HonchoHandles,
+	batch: HonchoMessage[],
+): Promise<void> {
+	if (batch.length === 0) return Promise.resolve();
+	return enqueue(async () => {
+		await handles.session.addMessages(batch);
+	});
+}
 
 export interface MemoryContextBlock {
 	userPeerName: string;

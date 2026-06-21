@@ -19,13 +19,13 @@
 通过 `omp` CLI 直接从 npm 安装插件：
 
 ```bash
-omp install @fa-software/oh-my-pi-honcho-memory
+omp install @citywalki/oh-my-pi-honcho-memory
 ```
 
 仅在当前项目中安装：
 
 ```bash
-omp install -l @fa-software/oh-my-pi-honcho-memory
+omp install -l @citywalki/oh-my-pi-honcho-memory
 ```
 
 oh-my-pi 下次启动时会自动加载该扩展。
@@ -44,7 +44,7 @@ oh-my-pi 下次启动时会自动加载该扩展。
       "aiPeer": "oh-my-pi"
     }
   },
-  "sessionStrategy": "per-repo"
+  "sessionStrategy": "per-directory"
 }
 ```
 
@@ -60,40 +60,45 @@ oh-my-pi 下次启动时会自动加载该扩展。
 - **云端或本地部署** - 使用 Honcho Cloud，或指向自托管/本地 Honcho 实例
 - **工作空间映射** - 一个共享的 Honcho workspace 承载团队或组织
 - **开发者声音隔离** - 每个开发者的观察记录在自己的 peer 下
-- **会话映射** - 支持按目录、仓库或全局范围划分会话
+- **Git 感知** - 在会话之间检测分支切换和外部提交
+- **会话映射** - 支持按目录、Git 分支或聊天实例划分会话
 - **持久化写入** - 保存明确的开发者观察
 - **记忆检索** - 搜索记忆、查询 Honcho 知识，并将相关上下文注入提示词
 
 ## 配置说明
 
-配置从五个来源合并，后写入的会覆盖前面的：
+配置从三个来源合并，后写入的会覆盖前面的：
 
 1. 默认值（内置）
-2. 全局配置：`~/.omp/agent/config.yml`
-3. 全局独立配置：`~/.honcho-memory.{json,yml,yaml}`
-4. 最近独立配置：从工作目录向上查找的最近 `.honcho-memory.{json,yml,yaml}`
-5. 项目配置：`<cwd>/.omp/config.yml`
-6. 环境变量（最高优先级）
+2. 全局配置：`~/.honcho/config.json`
+3. 环境变量（最高优先级）
 
-### 独立配置文件（推荐）
+### 独立配置文件
 
-你可以将 Honcho 配置放在独立文件中，而不是嵌入 `.omp/config.yml`。扩展会从当前工作目录向上搜索配置文件。
+你可以将 Honcho 配置放在独立文件中。扩展会从当前工作目录向上搜索最近的匹配文件。
 
 支持的文件名（按顺序查找）：
 - `.honcho-memory.json` / `.honcho-memory.yml` / `.honcho-memory.yaml`
 - `honcho-memory.config.json` / `honcho-memory.config.yml` / `honcho-memory.config.yaml`
 
 如需使用自定义文件名，设置 `HONCHO_MEMORY_CONFIG=acp.json`。
-
 ```json
 {
   "enabled": true,
-  "url": "https://api.honcho.dev",
   "apiKey": "hch-...",
   "workspace": "fa-dev",
   "aiPeer": "oh-my-pi",
   "peerName": "zhangsan",
-  "sessionStrategy": "per-repo",
+  "sessionStrategy": "per-directory",
+  "sessionPeerPrefix": true,
+  "saveMessages": true,
+  "reasoningLevel": "low",
+  "endpoint": { "environment": "production" },
+  "messageUpload": {
+    "maxUserTokens": null,
+    "maxAssistantTokens": null,
+    "summarizeAssistant": false
+  },
   "contextTokens": 1200
 }
 ```
@@ -103,13 +108,14 @@ oh-my-pi 下次启动时会自动加载该扩展。
 ### 独立配置文件（推荐）
 
 创建 `~/.honcho/config.json`：
-
 ```json
 {
   "apiKey": "hch-...",
   "peerName": "zhangsan",
-  "sessionStrategy": "per-repo",
-  "contextTokens": 1200,
+  "sessionStrategy": "per-directory",
+  "sessionPeerPrefix": true,
+  "saveMessages": true,
+  "endpoint": { "environment": "production" },
   "hosts": {
     "omp": {
       "workspace": "fa-dev",
@@ -142,7 +148,8 @@ oh-my-pi 下次启动时会自动加载该扩展。
     "/Users/me/work/project-b": {
       "apiKey": "hch-personal-key...",
       "workspace": "personal-ws",
-      "sessionStrategy": "per-directory"
+      "sessionStrategy": "git-branch",
+      "saveMessages": false
     }
   }
 }
@@ -155,34 +162,57 @@ oh-my-pi 下次启动时会自动加载该扩展。
 | 变量 | 用途 |
 | --- | --- |
 | `HONCHO_API_KEY` | Honcho API key |
-| `HONCHO_URL` | Honcho 服务端点 |
+| `HONCHO_URL` | Honcho 服务端点（覆盖 endpoint.baseUrl） |
 | `HONCHO_WORKSPACE` | Workspace ID |
 | `HONCHO_PEER_NAME` | 开发者 peer 名称 |
 | `HONCHO_AI_PEER` | AI peer 名称 |
 | `HONCHO_MEMORY_CONFIG` | 覆盖独立配置文件路径 |
-| `HONCHO_MEMORY_CONFIG` | 独立配置文件名（默认查找 `.honcho-memory.*`） |
+
+### 服务端点
+
+使用 `endpoint.environment` 指定已知端点，或使用 `endpoint.baseUrl` 指定自定义 URL：
+
+```json
+{
+  "endpoint": { "environment": "local" }
+}
+```
+
+`environment` 可选值：`production`（默认，`https://api.honcho.dev`）或 `local`（`http://127.0.0.1:8000`）。
+
+`HONCHO_URL` 仍然有效，并且优先级高于 `endpoint`。
 
 ### 云端 vs 本地
 
 使用 Honcho Cloud：
 
 - 必须提供 `apiKey`
-- `url` 保持 `https://api.honcho.dev`
+- `endpoint.environment` 保持 `production`
 
 使用自托管或本地 Honcho：
 
-- `url` 指向你的部署地址，例如 `http://127.0.0.1:8000`
+- 设置 `endpoint.environment` 为 `local`，或设置 `endpoint.baseUrl` 为你的部署地址
 - 仅当部署需要认证时才提供 `apiKey`
 
 ### 会话策略
 
 | 策略 | 行为 | 适用场景 |
 | --- | --- | --- |
-| `per-directory` | 每个工作目录一个会话 | 默认项目记忆 |
-| `per-repo` | 每个仓库一个会话 | 单个仓库有多个入口目录 |
-| `per-session` | 每个 oh-my-pi 会话 ID 一个新会话 | 短期隔离工作 |
-| `global` | 所有工作共用一个会话 | 跨项目共享记忆 |
+| `per-directory`（默认） | 每个工作目录一个会话，命名为 `{peerName}-{repoName}` | 默认项目记忆 |
+| `git-branch` | 会话名包含当前 Git 分支，如 `{peerName}-{repoName}-{branch}` | 特性分支工作流 |
+| `chat-instance` | 每个 oh-my-pi 聊天一个会话，如 `{peerName}-chat-{sessionId}` | 短期隔离工作 |
 
+默认会话名会加上 `peerName` 前缀。如果你是唯一用户，可设置 `sessionPeerPrefix: false` 获得更短的会话名。
+
+你还可以通过 `sessions` 映射为特定目录覆盖 per-directory 的会话名：
+
+```json
+{
+  "sessions": {
+    "/Users/me/work/project-a": "alice-custom-a"
+  }
+}
+```
 ## 身份模型
 
 在 Honcho 中，一切皆 peer：
@@ -211,9 +241,15 @@ workspace: fa-dev
 | 工具 | 说明 |
 | --- | --- |
 | `honcho_search` | 搜索开发者和 AI peer 的 Honcho 会话消息和记忆 |
+| `honcho_get_context` | 获取开发者或 AI peer 的稳定记忆上下文 |
+| `honcho_get_representation` | 获取开发者或 AI peer 的 representation 字符串 |
 | `honcho_chat` | 向 Honcho 查询基于推理的上下文 |
-| `honcho_remember` | 将持久化结论保存到开发者 peer |
-
+| `honcho_list_conclusions` | 列出开发者 peer 的持久化结论 |
+| `honcho_add_conclusion` | 将持久化结论保存到开发者 peer |
+| `honcho_remember` | `honcho_add_conclusion` 的别名 |
+| `honcho_delete_conclusion` | 按 ID 删除持久化结论 |
+| `honcho_get_config` | 查看当前 Honcho 配置和连接状态 |
+| `honcho_set_config` | 更新 `~/.honcho/config.json` 中的 Honcho 配置字段 |
 ## 本地开发
 
 本地开发或调试本扩展：
@@ -231,7 +267,7 @@ omp install ./
 发布新版本后，更新已安装的插件：
 
 ```bash
-omp update @fa-software/oh-my-pi-honcho-memory
+omp update @citywalki/oh-my-pi-honcho-memory
 ```
 
 ## 发布

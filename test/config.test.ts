@@ -39,28 +39,32 @@ describe("resolveConfig", () => {
 		expect(config.workspace).toBe("oh-my-pi");
 		expect(config.peerName).toBe("user");
 		expect(config.aiPeer).toBe("ai-oh-my-pi");
-		expect(config.sessionStrategy).toBe("per-repo");
+		expect(config.sessionStrategy).toBe("per-directory");
+		expect(config.sessionPeerPrefix).toBe(true);
 		expect(config.observationMode).toBe("unified");
+		expect(config.reasoningLevel).toBe("low");
+		expect(config.saveMessages).toBe(true);
+		expect(config.endpoint.environment).toBe("production");
+		expect(config.messageUpload).toEqual({});
 		expect(config.contextTokens).toBe(1200);
 		expect(config.commitEveryNTurns).toBe(4);
 		expect(config.contextRefresh.ttlSeconds).toBe(300);
 		expect(config.contextRefresh.messageThreshold).toBe(30);
 	});
-
 	// ---- Global fields ----
 
 	it("reads global fields from config.json", () => {
 		mkdirSync(join(tmpHome, ".honcho"), { recursive: true });
 		writeFileSync(
 			join(tmpHome, ".honcho", "config.json"),
-			JSON.stringify({ enabled: true, apiKey: "hch-key", workspace: "ws", peerName: "Alice", contextTokens: 500 }),
+			JSON.stringify({ enabled: true, apiKey: "hch-key", workspace: "ws", peerName: "Alice", sessionPeerPrefix: false, contextTokens: 500 }),
 		);
 		const config = resolveConfig("/tmp/nonexistent");
 		expect(config.enabled).toBe(true);
 		expect(config.apiKey).toBe("hch-key");
 		expect(config.workspace).toBe("ws");
 		expect(config.peerName).toBe("alice");
-		expect(config.contextTokens).toBe(500);
+		expect(config.sessionPeerPrefix).toBe(false);
 	});
 
 	it("reads contextRefresh from config.json", () => {

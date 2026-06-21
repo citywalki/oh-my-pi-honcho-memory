@@ -6,10 +6,12 @@ import type {
 } from "@oh-my-pi/pi-coding-agent";
 import { appendFileSync } from "node:fs";
 import { createHonchoHandles, type HonchoHandles, type HonchoMessage, type SessionKey } from "./client.js";
-import { resolveConfig, isConfigured } from "./config.js";
+import { resolveConfig, isConfigured, getSessionOverride } from "./config.js";
 import {
 	compileMemoryContext,
+	flushPending,
 	hydrateMemoryContext,
+	queueMessageBatch,
 	refreshPromptContext,
 	saveUserConclusion,
 	formatContinuityContext,
@@ -23,8 +25,9 @@ import {
 	collectMessagePairs,
 	collectToolSummary,
 	extractDurableConclusion,
+	maybeTruncateContent,
 } from "./message-utils.js";
-import { buildSessionKey, deriveProjectRoot } from "./session-key.js";
+import { buildSessionKey } from "./session-key.js";
 import { registerTools } from "./tools.js";
 import { registerCommands } from "./commands.js";
 
@@ -41,6 +44,8 @@ interface SessionState {
 	memoryReady: boolean;
 	/** Track last batch size to detect duplicate agent_end calls */
 	lastAgentEndBatchSize: number;
+	/** Cached git state for this session */
+	gitState: import("./git.js").GitState | null;
 }
 function createSessionState(): SessionState {
 	return {
@@ -54,6 +59,7 @@ function createSessionState(): SessionState {
 		recentConclusions: [],
 		memoryReady: false,
 		lastAgentEndBatchSize: -1,
+		gitState: null,
 	};
 }
 const CONTEXT_FETCH_TIMEOUT_MS = 4000;
@@ -68,6 +74,16 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 	const sessions = new Map<SessionKey, SessionState>();
 	const bootstrapLocks = new Map<SessionKey, Promise<HonchoHandles | null>>();
 
+	function setStatus(ctx: ExtensionContext, state: "off" | "connected" | "syncing" | "offline" | "error" | undefined): void {
+		const labels: Record<string, string> = {
+			off: "off",
+			connected: "connected",
+			syncing: "syncing",
+			offline: "offline",
+			error: "error",
+		};
+		ctx.ui.setStatus("honcho", state ? labels[state] : undefined);
+	}
 	function getState(sessionKey: SessionKey): SessionState {
 		let state = sessions.get(sessionKey);
 		if (!state) {
@@ -76,15 +92,15 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		}
 		return state;
 	}
-
 	function deriveSessionKey(cwd: string, sessionId: string): SessionKey {
-		const rootDir = deriveProjectRoot(cwd);
 		const config = resolveConfig(cwd);
 		return buildSessionKey({
 			sessionStrategy: config.sessionStrategy,
-			rootDir,
+			sessionPeerPrefix: config.sessionPeerPrefix,
+			peerName: config.peerName,
 			cwd,
 			sessionId,
+			sessions: getSessionOverride(cwd) ? { [cwd]: getSessionOverride(cwd)! } : undefined,
 		});
 	}
 	async function bootstrap(cwd: string, sessionId: string): Promise<HonchoHandles | null> {
@@ -188,10 +204,45 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		const t0 = Date.now();
 		const sessionId = ctx.sessionManager.sessionId ?? "default";
 		log(`session_start: begin, sessionId=${sessionId} cwd=${ctx.cwd}`);
+		setStatus(ctx, "syncing");
 		const handles = await bootstrap(ctx.cwd, sessionId);
-		if (!handles) { log("session_start: no handles, exiting"); return; }
+		if (!handles) {
+			log("session_start: no handles, exiting");
+			setStatus(ctx, undefined);
+			return;
+		}
 		log(`session_start: bootstrap done in ${Date.now() - t0}ms`);
+		setStatus(ctx, "connected");
 		const state = getState(handles.sessionId);
+
+		// Capture git state and detect external changes (Claude pattern).
+		const { captureGitState, detectGitChanges, getRecentCommits, isGitRepo, inferFeatureContext } = await import("./git.js");
+		const previousGitState = state.gitState;
+		const currentGitState = captureGitState(ctx.cwd);
+		const gitChanges = currentGitState ? detectGitChanges(previousGitState, currentGitState) : [];
+		const recentCommits = isGitRepo(ctx.cwd) ? getRecentCommits(ctx.cwd, 5) : [];
+		const featureContext = currentGitState ? inferFeatureContext(currentGitState, recentCommits) : null;
+		if (currentGitState) {
+			state.gitState = currentGitState;
+		}
+
+		// Upload git changes as observations (fire-and-forget).
+		const externalGitChanges = gitChanges.filter((c) => c.type !== "initial");
+		if (externalGitChanges.length > 0) {
+			const messages = externalGitChanges.map((change) =>
+				handles.userPeer.message(`[Git External] ${change.description}`, {
+					metadata: {
+						type: "git_change",
+						change_type: change.type,
+						from: change.from,
+						to: change.to,
+						external: true,
+					},
+				}),
+			);
+			handles.session.addMessages(messages).catch((err) => log(`session_start: git observations failed: ${String(err)}`));
+		}
+
 		const t1 = Date.now();
 		const memoryBlock = await hydrateMemoryContextWithTimeout(handles).catch(() => {
 			log(`session_start: hydrate timed out after ${Date.now() - t1}ms`);
@@ -210,12 +261,47 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		} catch {
 			log(`session_start: warmup failed after ${Date.now() - t2}ms`);
 		}
-		log(`session_start: DONE total=${Date.now() - t0}ms`);
+
+		// Fire-and-forget dialectic queries to warm the knowledge graph (Claude pattern).
+		const branchContext = currentGitState ? ` on branch '${currentGitState.branch}'` : "";
+		const featureHint = featureContext && featureContext.confidence !== "low"
+			? ` Working on: ${featureContext.type} - ${featureContext.description}.`
+			: "";
+		const dialecticLevel = handles.config.reasoningLevel;
+		try {
+			if (handles.config.observationMode === "unified") {
+				handles.userPeer.chat(
+					`Summarize what you know about ${handles.config.peerName}. Focus on preferences, current projects, and working style.${branchContext}${featureHint}`,
+					{ session: handles.session, reasoningLevel: dialecticLevel },
+				).catch((err) => log(`session_start: dialectic user failed: ${String(err)}`));
+				handles.userPeer.chat(
+					`What has ${handles.config.peerName} been working on recently?${branchContext}${featureHint} Summarize recent activities relevant to the current work.`,
+					{ session: handles.session, reasoningLevel: dialecticLevel },
+				).catch((err) => log(`session_start: dialectic recent failed: ${String(err)}`));
+			} else {
+				handles.aiPeer.chat(
+					`Summarize what you know about ${handles.config.peerName}. Focus on preferences, current projects, and working style.${branchContext}${featureHint}`,
+					{ target: handles.userPeer, session: handles.session, reasoningLevel: dialecticLevel },
+				).catch((err) => log(`session_start: dialectic user failed: ${String(err)}`));
+				handles.aiPeer.chat(
+					`What has ${handles.config.peerName} been working on recently?${branchContext}${featureHint} Summarize recent activities relevant to the current work.`,
+					{ target: handles.userPeer, session: handles.session, reasoningLevel: dialecticLevel },
+				).catch((err) => log(`session_start: dialectic recent failed: ${String(err)}`));
+			}
+		} catch {
+			// Non-fatal: dialectic warmup is best-effort.
+		}
 	});
 
 	pi.on("session_switch", async (_event, ctx) => {
+		// Drain any queued uploads from the previous session before switching.
+		await flushPending().catch(() => {});
+		setStatus(ctx, "syncing");
 		const handles = await getHandlesFromCtx(ctx);
-		if (!handles) return;
+		if (!handles) {
+			setStatus(ctx, undefined);
+			return;
+		}
 		const state = getState(handles.sessionId);
 		state.contextCache = { block: null, queriedAt: 0, messageCount: 0 };
 		state.lastPromptContextQuery = null;
@@ -233,6 +319,7 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		state.lastMemoryBlock = memoryBlock;
 		state.lastMemoryContext = compileMemoryContext(memoryBlock, null);
 		state.memoryReady = true;
+		setStatus(ctx, "connected");
 	});
 
 
@@ -339,9 +426,13 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 		const t0 = Date.now();
 		const handles = await getHandlesFromCtx(ctx);
 		if (!handles) return;
+		setStatus(ctx, "syncing");
 
 		const pairs = collectMessagePairs(event.messages ?? []);
-		if (pairs.length === 0) return;
+		if (pairs.length === 0) {
+			setStatus(ctx, "connected");
+			return;
+		}
 
 		const state = getState(handles.sessionId);
 
@@ -359,11 +450,19 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 
 		// Build all messages locally (instant, no I/O).
 		const batch: HonchoMessage[] = [];
+		const userUploadConfig = {
+			maxTokens: handles.config.messageUpload.maxUserTokens,
+		};
+		const assistantUploadConfig = {
+			maxTokens: handles.config.messageUpload.maxAssistantTokens,
+			summarize: handles.config.messageUpload.summarizeAssistant,
+		};
 
 		for (const message of pairs) {
 			if (message.role === "user") {
-				batch.push(handles.userPeer.message(message.content));
-				const conclusion = extractDurableConclusion(message.content);
+				const content = maybeTruncateContent(message.content, userUploadConfig);
+				batch.push(handles.userPeer.message(content));
+				const conclusion = extractDurableConclusion(content);
 				if (conclusion) {
 					// Fire-and-forget: don't block the handler.
 					saveUserConclusion(handles, conclusion)
@@ -376,28 +475,34 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 						.catch(() => {});
 				}
 			} else {
-				batch.push(handles.aiPeer.message(message.content));
+				const content = maybeTruncateContent(message.content, assistantUploadConfig);
+				batch.push(handles.aiPeer.message(content));
 			}
 		}
 
-		const toolSummary = collectToolSummary(event.messages ?? []);
-		if (toolSummary) {
-			batch.push(handles.aiPeer.message(`[Tool] ${toolSummary}`, { metadata: { kind: "tool_summary" } }));
+		// Enqueue upload so concurrent agent_end events do not issue parallel
+		// addMessages calls. Lifecycle boundaries call flushPending() to drain.
+		if (handles.config.saveMessages !== false) {
+			queueMessageBatch(handles, batch).then(
+				() => {
+					log(`agent_end: batch saved in ${Date.now() - t0}ms`);
+					setStatus(ctx, "connected");
+				},
+				(err: unknown) => {
+					log(`agent_end: batch failed: ${String(err)}`);
+					setStatus(ctx, "offline");
+				},
+			);
+		} else {
+			log(`agent_end: saveMessages disabled, skipping batch upload`);
+			setStatus(ctx, "connected");
 		}
-
-		// Fire-and-forget: start the upload but DON'T wait.
-		// If it fails, messages are lost for this turn — acceptable tradeoff
-		// to stay under the 30s handler timeout. The SDK's built-in retries
-		// provide a safety net.
-		handles.session.addMessages(batch).then(
-			() => log(`agent_end: batch saved in ${Date.now() - t0}ms`),
-			(err) => log(`agent_end: batch failed: ${String(err)}`),
-		);
 
 		log(`agent_end: DONE total=${Date.now() - t0}ms`);
 	});
-
 	pi.on("session_before_compact", async (_event, ctx) => {
+		// Ensure all pending message uploads complete before compaction runs.
+		await flushPending().catch(() => {});
 		const handles = await getHandlesFromCtx(ctx);
 		if (!handles) return;
 		const state = getState(handles.sessionId);
@@ -438,6 +543,24 @@ export default function honchoMemoryExtension(pi: ExtensionAPI): void {
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
+		// Drain queued uploads before the session goes away. oh-my-pi caps this
+		// handler at 2s, so the flush is awaited but bounded by the host timeout.
+		await flushPending().catch(() => {});
+		setStatus(ctx, "off");
+		const handles = await getHandlesFromCtx(ctx).catch(() => null);
+		if (handles) {
+			// Best-effort session-end marker; do not await because oh-my-pi
+			// imposes a 2s handler timeout for this event.
+			const marker = handles.aiPeer.message(`[Session ended]`, {
+				metadata: { type: "session_end_marker" },
+			});
+			handles.session
+				.addMessages([marker])
+				.then(
+					() => log(`session_shutdown: end marker uploaded`),
+					(err: unknown) => log(`session_shutdown: end marker failed: ${String(err)}`),
+				);
+		}
 		const sessionId = ctx.sessionManager.sessionId ?? "default";
 		const sessionKey = deriveSessionKey(ctx.cwd, sessionId);
 		sessions.delete(sessionKey);

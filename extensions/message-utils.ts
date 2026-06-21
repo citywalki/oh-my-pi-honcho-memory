@@ -122,3 +122,28 @@ export function extractDurableConclusion(content: string): string | null {
 	}
 	return trimmed;
 }
+
+export function estimateTokens(text: string): number {
+	return Math.ceil(text.length / 4);
+}
+
+export function truncateToTokens(text: string, maxTokens: number): string {
+	if (maxTokens <= 0) return text;
+	const maxChars = maxTokens * 4;
+	if (text.length <= maxChars) return text;
+	return `${text.slice(0, maxChars - 3)}...`;
+}
+
+export function maybeTruncateContent(
+	content: string,
+	config: { maxTokens?: number; summarize?: boolean },
+): string {
+	if (!config.maxTokens) return content;
+	if (config.summarize && estimateTokens(content) > config.maxTokens) {
+		// Best-effort summarization: keep first paragraph, indicate truncation.
+		const firstParagraph = content.split("\n\n")[0] ?? "";
+		const truncated = truncateToTokens(firstParagraph, Math.max(1, config.maxTokens - 5));
+		return `${truncated}\n\n[Content truncated; original was ${estimateTokens(content)} tokens]`;
+	}
+	return truncateToTokens(content, config.maxTokens);
+}

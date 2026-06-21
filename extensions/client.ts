@@ -23,6 +23,7 @@ export interface HonchoPeer {
 	}): Promise<{ representation: string; peerCard: string[] | null }>;
 	conclusionsOf(targetPeer: HonchoPeer): {
 		create(params: { content: string; sessionId?: string }): Promise<unknown>;
+		delete(id: string): Promise<unknown>;
 	};
 	chat(
 		query: string,
@@ -85,7 +86,7 @@ export async function createHonchoHandles(params: {
 
 	const peerConfigs: Record<string, { observeMe: boolean; observeOthers: boolean }> = {
 		[userPeerId]: { observeMe: true, observeOthers: false },
-		[aiPeerId]: { observeMe: true, observeOthers: true },
+		[aiPeerId]: { observeMe: true, observeOthers: params.config.observationMode === "directional" },
 	};
 
 	const honchoSession = session as HonchoSession;

@@ -1,33 +1,15 @@
-import { existsSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename } from "node:path";
 import { execSync } from "node:child_process";
 import type { HonchoSessionStrategy } from "./config.js";
 
-export function deriveSessionScope(params: {
-	sessionStrategy: HonchoSessionStrategy;
-	rootDir: string;
-	repoName: string;
-	currentDirectory: string;
-	sessionId: string;
-}): string {
-	switch (params.sessionStrategy) {
-		case "per-session":
-			return params.sessionId;
-		case "per-directory":
-			return params.currentDirectory;
-		case "per-repo":
-			return params.repoName || params.rootDir;
-		case "global":
-			return "global";
-		default:
-			return params.repoName || params.rootDir;
-	}
+export function sanitizeForSessionName(s: string): string {
+	return s.toLowerCase().replace(/[^a-z0-9-_]/g, "-");
 }
 
-export function deriveGitBranchLabel(rootDir: string): string | null {
+export function deriveGitBranchLabel(cwd: string): string | null {
 	try {
 		const result = execSync("git branch --show-current", {
-			cwd: rootDir,
+			cwd,
 			encoding: "utf8",
 			stdio: ["pipe", "pipe", "ignore"],
 		});
@@ -37,40 +19,39 @@ export function deriveGitBranchLabel(rootDir: string): string | null {
 	}
 }
 
-export function deriveProjectRoot(cwd: string): string {
-	let dir = cwd;
-	for (let i = 0; i < 32; i++) {
-		if (
-			existsSync(join(dir, ".git")) ||
-			existsSync(join(dir, ".omp")) ||
-			existsSync(join(dir, "package.json"))
-		) {
-			return dir;
-		}
-		const parent = dirname(dir);
-		if (parent === dir) break;
-		dir = parent;
-	}
-	return cwd;
-}
-
-function normalizeId(value: string): string {
-	return value.toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-|-$/g, "") || "default";
-}
-
 export function buildSessionKey(params: {
 	sessionStrategy: HonchoSessionStrategy;
-	rootDir: string;
+	sessionPeerPrefix: boolean;
+	peerName: string;
 	cwd: string;
 	sessionId: string;
+	sessions?: Record<string, string>;
 }): string {
-	const repoName = basename(params.rootDir);
-	const scope = deriveSessionScope({
-		sessionStrategy: params.sessionStrategy,
-		rootDir: params.rootDir,
-		repoName,
-		currentDirectory: params.cwd,
-		sessionId: params.sessionId,
-	});
-	return normalizeId(`${params.sessionStrategy}:${scope}`);
+	// Manual overrides only apply to per-directory strategy.
+	if (params.sessionStrategy === "per-directory" && params.sessions?.[params.cwd]) {
+		return sanitizeForSessionName(params.sessions[params.cwd]);
+	}
+
+	const usePrefix = params.sessionPeerPrefix;
+	const peerPart = sanitizeForSessionName(params.peerName);
+	const repoPart = sanitizeForSessionName(basename(params.cwd));
+	const base = usePrefix ? `${peerPart}-${repoPart}` : repoPart;
+
+	switch (params.sessionStrategy) {
+		case "git-branch": {
+			const branch = deriveGitBranchLabel(params.cwd);
+			if (branch) {
+				const branchPart = sanitizeForSessionName(branch);
+				return `${base}-${branchPart}`;
+			}
+			return base;
+		}
+		case "chat-instance": {
+			const instancePart = sanitizeForSessionName(params.sessionId);
+			return usePrefix ? `${peerPart}-chat-${instancePart}` : `chat-${instancePart}`;
+		}
+		case "per-directory":
+		default:
+			return base;
+	}
 }

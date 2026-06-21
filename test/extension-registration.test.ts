@@ -55,16 +55,19 @@ describe("registerTools", () => {
 		const names = registeredTools.map((t) => t.name);
 		expect(names).toContain("honcho_search");
 		expect(names).toContain("honcho_get_context");
+		expect(names).toContain("honcho_get_representation");
 		expect(names).toContain("honcho_chat");
 		expect(names).toContain("honcho_list_conclusions");
 		expect(names).toContain("honcho_add_conclusion");
 		expect(names).toContain("honcho_remember");
+		expect(names).toContain("honcho_delete_conclusion");
+		expect(names).toContain("honcho_get_config");
 	});
 
-	it("registers exactly 6 tools", () => {
+	it("registers exactly 10 tools", () => {
 		const { module, registeredTools } = createMockPi();
 		registerTools(module as never, { getHandles: async () => null });
-		expect(registeredTools.length).toBe(6);
+		expect(registeredTools.length).toBe(10);
 	});
 });
 

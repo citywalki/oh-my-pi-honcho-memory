@@ -19,13 +19,13 @@ Give oh-my-pi long-term memory that survives context wipes, session restarts, an
 Install the plugin directly from npm using the `omp` CLI:
 
 ```bash
-omp install @fa-software/oh-my-pi-honcho-memory
+omp install @citywalki/oh-my-pi-honcho-memory
 ```
 
 To install it only for the current project:
 
 ```bash
-omp install -l @fa-software/oh-my-pi-honcho-memory
+omp install -l @citywalki/oh-my-pi-honcho-memory
 ```
 
 oh-my-pi will discover the extension automatically on next startup.
@@ -44,7 +44,7 @@ Create `~/.honcho/config.json`:
       "aiPeer": "oh-my-pi"
     }
   },
-  "sessionStrategy": "per-repo"
+  "sessionStrategy": "per-directory"
 }
 ```
 
@@ -59,24 +59,22 @@ Create `~/.honcho/config.json`:
 - **Cloud or Local Deployments** - Use Honcho Cloud or point at a self-hosted or local Honcho instance
 - **Workspace Mapping** - A shared Honcho workspace holds your team or organization
 - **Developer Voice Isolation** - Each developer's observations are captured under their own peer
-- **Session Mapping** - Sessions can be scoped per directory, repo, or globally
+- **Git Awareness** - Detect branch switches and external commits between sessions
+- **Session Mapping** - Sessions can be scoped per directory, git branch, or chat instance
 - **Durable Writes** - Save explicit developer observations and conclusions
 - **Memory Retrieval** - Search memory, query Honcho knowledge, and inject relevant context into prompts
 
 ## Configuration
 
-Configuration is resolved from five sources, later sources overriding earlier ones:
+Configuration is resolved from three sources, later sources overriding earlier ones:
 
 1. Defaults (built-in)
-2. Global: `~/.omp/agent/config.yml`
-3. Global dedicated: `~/.honcho-memory.{json,yml,yaml}`
-4. Nearest dedicated: `.honcho-memory.{json,yml,yaml}` nearest to cwd (walks parent directories)
-5. Project: `<cwd>/.omp/config.yml`
-6. Environment variables (highest precedence)
+2. Global: `~/.honcho/config.json`
+3. Environment variables (highest precedence)
 
-### Dedicated Config File (Recommended)
+### Dedicated Config File
 
-Instead of embedding Honcho config inside `.omp/config.yml`, you can place a separate config file directly in any directory. The extension searches upward from the current working directory.
+You can place a separate config file in any directory. The extension searches upward from the current working directory for the nearest match.
 
 Supported file names (checked in order):
 - `.honcho-memory.json` / `.honcho-memory.yml` / `.honcho-memory.yaml`
@@ -87,12 +85,20 @@ To use a custom file name, set `HONCHO_MEMORY_CONFIG=acp.json`.
 ```json
 {
   "enabled": true,
-  "url": "https://api.honcho.dev",
   "apiKey": "hch-...",
   "workspace": "fa-dev",
   "aiPeer": "oh-my-pi",
   "peerName": "zhangsan",
-  "sessionStrategy": "per-repo",
+  "sessionStrategy": "per-directory",
+  "sessionPeerPrefix": true,
+  "saveMessages": true,
+  "reasoningLevel": "low",
+  "endpoint": { "environment": "production" },
+  "messageUpload": {
+    "maxUserTokens": null,
+    "maxAssistantTokens": null,
+    "summarizeAssistant": false
+  },
   "contextTokens": 1200
 }
 ```
@@ -107,8 +113,10 @@ Create `~/.honcho/config.json`:
 {
   "apiKey": "hch-...",
   "peerName": "zhangsan",
-  "sessionStrategy": "per-repo",
-  "contextTokens": 1200,
+  "sessionStrategy": "per-directory",
+  "sessionPeerPrefix": true,
+  "saveMessages": true,
+  "endpoint": { "environment": "production" },
   "hosts": {
     "omp": {
       "workspace": "fa-dev",
@@ -141,7 +149,7 @@ Use the `directories` block to apply different settings per project (longest pre
     "/Users/me/work/project-b": {
       "apiKey": "hch-personal-key...",
       "workspace": "personal-ws",
-      "sessionStrategy": "per-directory"
+      "sessionStrategy": "git-branch"
     }
   }
 }
@@ -153,33 +161,45 @@ Use the `directories` block to apply different settings per project (longest pre
 | Variable | Purpose |
 | --- | --- |
 | `HONCHO_API_KEY` | Honcho API key |
-| `HONCHO_URL` | Honcho endpoint |
+| `HONCHO_URL` | Honcho endpoint (overrides endpoint.baseUrl) |
 | `HONCHO_WORKSPACE` | Workspace ID |
 | `HONCHO_PEER_NAME` | Developer peer name |
 | `HONCHO_AI_PEER` | AI peer name |
 | `HONCHO_MEMORY_CONFIG` | Override dedicated config file path |
-| `HONCHO_MEMORY_CONFIG` | Dedicated config file name (default: searches for `.honcho-memory.*`) |
 
-### Cloud vs Local
+### Endpoint
 
-For Honcho Cloud:
+Use `endpoint.environment` for well-known endpoints, or `endpoint.baseUrl` for a custom URL:
 
-- `apiKey` is required
-- `url` should remain `https://api.honcho.dev`
+```json
+{
+  "endpoint": { "environment": "local" }
+}
+```
 
-For self-hosted or local Honcho:
+`environment` values: `production` (default, `https://api.honcho.dev`) or `local` (`http://127.0.0.1:8000`).
 
-- `url` should point to your deployment, for example `http://127.0.0.1:8000`
-- `apiKey` is required only if that deployment requires authentication
+`HONCHO_URL` still works and takes precedence over `endpoint`.
 
 ### Session Strategies
 
 | Strategy | Behavior | Best for |
 | --- | --- | --- |
-| `per-directory` | One session per working directory | Default project memory |
-| `per-repo` | One session per repository | Repos with multiple entry directories |
-| `per-session` | New session for each oh-my-pi session id | Short-lived isolated work |
-| `global` | One session for everything | Shared memory across all work |
+| `per-directory` (default) | One session per working directory, named `{peerName}-{repoName}` | Default project memory |
+| `git-branch` | Session name includes the current git branch, e.g. `{peerName}-{repoName}-{branch}` | Feature-branch workflows |
+| `chat-instance` | Each oh-my-pi chat gets its own session, e.g. `{peerName}-chat-{sessionId}` | Short-lived isolated work |
+
+Session names are prefixed with your `peerName` by default. Set `sessionPeerPrefix: false` if you are the only user and want shorter names.
+
+You can override the per-directory session name for specific directories with the `sessions` map:
+
+```json
+{
+  "sessions": {
+    "/Users/me/work/project-a": "alice-custom-a"
+  }
+}
+```
 
 ## Identity Model
 
@@ -208,11 +228,16 @@ Conversational turns are automatically saved under the current `user-{developer}
 The extension exposes these tools inside oh-my-pi:
 
 | Tool | Description |
-| --- | --- |
 | `honcho_search` | Search Honcho session messages across developer peers |
+| `honcho_get_context` | Retrieve stable memory context for the developer or AI peer |
+| `honcho_get_representation` | Retrieve the developer or AI peer's representation string |
 | `honcho_chat` | Query Honcho for reasoning-backed context |
-| `honcho_remember` | Save a durable memory conclusion to the developer peer |
-
+| `honcho_list_conclusions` | List durable conclusions stored for the developer peer |
+| `honcho_add_conclusion` | Save a durable memory conclusion to the developer peer |
+| `honcho_remember` | Alias for `honcho_add_conclusion` |
+| `honcho_delete_conclusion` | Delete a durable conclusion by ID |
+| `honcho_get_config` | View current Honcho configuration and connection status |
+| `honcho_set_config` | Update a Honcho configuration field in `~/.honcho/config.json` |
 ## Development
 
 For developing or debugging this extension locally:
@@ -230,7 +255,7 @@ Then restart oh-my-pi.
 To update the installed plugin after publishing a new version:
 
 ```bash
-omp update @fa-software/oh-my-pi-honcho-memory
+omp update @citywalki/oh-my-pi-honcho-memory
 ```
 
 ## Publishing

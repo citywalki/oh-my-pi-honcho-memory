@@ -1,10 +1,10 @@
 # Repository Guidelines
 
-> 本仓库指南面向需要理解和修改 `@fa-software/oh-my-pi-honcho-memory` 的 AI 助手。
+> 本仓库指南面向需要理解和修改 `@citywalki/oh-my-pi-honcho-memory` 的 AI 助手。
 
 ## Project Overview
 
-`@fa-software/oh-my-pi-honcho-memory` 是一个 oh-my-pi 扩展，通过 [Honcho](https://honcho.dev) 平台为 AI 助手提供持久化长期记忆。它让助手在上下文被清空、会话重启或切换工作目录后，仍能保留项目事实、开发者观察与推理上下文。
+`@citywalki/oh-my-pi-honcho-memory` 是一个 oh-my-pi 扩展
 
 扩展运行在 oh-my-pi 宿主内，注册工具与斜杠命令，并监听 Agent 生命周期事件自动读写记忆。
 
@@ -17,16 +17,15 @@ oh-my-pi host
     │
     ├── 调用 honchoMemoryExtension(pi: ExtensionAPI)
     │       │
-    │       ├── 解析配置：默认值 → ~/.omp/agent/config.yml → ./.omp/config.yml → 环境变量
-    │       ├── 根据项目根目录与会话策略生成 SessionKey
-    │       ├── 启动 Honcho：workspace / peers / session
-    │       ├── 注册工具：honcho_search、honcho_chat、honcho_remember
-    │       └── 注册命令：/honcho-status、/honcho-save-to-project
+    │       ├── 解析配置：默认值 → ~/.honcho/config.json → 环境变量
+    │       ├── 根据工作目录、Git 分支或聊天实例生成 SessionKey
+    │       ├── 注册工具：honcho_search、honcho_get_context、honcho_get_representation、honcho_chat、honcho_list_conclusions、honcho_add_conclusion、honcho_remember、honcho_delete_conclusion、honcho_get_config、honcho_set_config
+    │       └── 注册命令：/honcho-status、/honcho-config、/honcho-setup
     │
     ├── session_start / session_switch  → 加载记忆上下文
     ├── before_agent_start              → 将编译后的记忆注入 system prompt
-    ├── agent_end                       → 持久化用户/助手对话轮次
-    └── session_shutdown                → 释放内存中的会话状态
+    ├── agent_end                       → 每轮对话结束后增量保存用户/助手消息
+    └── session_shutdown                → 上传 session 结束标记并释放内存状态
 ```
 
 ### 关键模块职责
@@ -35,8 +34,8 @@ oh-my-pi host
 |------|------|
 | `extensions/index.ts` | 扩展入口；管理会话状态、事件监听、工具与命令注册 |
 | `extensions/config.ts` | 多层配置解析与默认值处理 |
-| `extensions/session-key.ts` | 探测项目根目录并生成归一化的 `SessionKey` |
-| `extensions/client.ts` | 封装 Honcho SDK，创建 `HonchoHandles`、peers 与会话 |
+| `extensions/session-key.ts` | 根据策略、peerName、当前目录与 `sessions` 覆盖生成归一化的 `SessionKey` |
+| `extensions/git.ts` | 捕获 git 状态、检测变化、推断 feature context |
 | `extensions/memory.ts` | 上下文加载、prompt 上下文刷新、编译与持久化 |
 | `extensions/tools.ts` | 基于 Zod 的工具定义与执行逻辑 |
 | `extensions/commands.ts` | 斜杠命令处理 |
@@ -50,10 +49,11 @@ oh-my-pi host
 - **Peer 身份模型**：Honcho 中一切皆 peer，共享同一个 workspace。
   - `user-{peerName}` —— 开发者专属观察
   - `ai-{aiPeer}` —— 助手身份
-  - `project-{projectPeer}` —— 共享项目知识（可选）
-- **会话作用域**：`per-directory`、`per-repo`、`per-session`、`global`。
-
-## Key Directories
+- **会话作用域**：`per-directory`、`git-branch`、`chat-instance`，默认 `per-directory`；支持 `sessions` 手动覆盖。
+- **Git 感知**：session 启动时捕获分支/commit/脏文件，上传外部变更作为观察。
+- **Dialectic 预热**：session 启动时触发 fire-and-forget 的 `peer.chat()` 查询以预热知识图谱。
+- **Message upload**：`saveMessages` 与 `messageUpload` 控制是否保存及截断消息。
+- **生命周期映射差异**：oh-my-pi 没有 Claude Code 的 `session_end` 钩子；本扩展使用 `agent_end` 做增量保存（每个 turn 结束时入队），`session_switch` / `session_before_compact` / `session_shutdown` 调用 `flushPending()` 排空队列。`session_shutdown` 在 oh-my-pi 中有 2s 处理器超时，因此关键上传不能仅依赖该事件。
 
 | 目录 | 用途 |
 |------|------|
@@ -127,7 +127,8 @@ omp install ./
 ### 命名与格式
 
 - TypeScript 启用 `strict: true`；导出的函数建议显式返回类型。
-- Peer / session ID 归一化为小写 kebab-case。
+- Peer / session ID 归一化为小写 kebab-case；session 名默认带 `peerName` 前缀。
+- 配置遵循 Honcho 官方 Claude Code 插件格式：`~/.honcho/config.json`，支持 `hosts.omp`、`directories`、`endpoint`、`sessions`。
 - 常量与默认值放在各自模块内。
 - 当前未配置 linter 或 formatter，依靠 TypeScript 严格模式与人工保持一致。
 
@@ -141,11 +142,8 @@ omp install ./
 | `extensions/memory.ts` | 上下文加载、prompt 编译与持久化辅助函数 |
 | `extensions/session-key.ts` | 项目根目录探测与会话键生成 |
 | `extensions/commands.ts` | 斜杠命令处理器 |
-| `extensions/tools.ts` | 基于 Zod 的工具定义 |
-| `types/oh-my-pi.d.ts` | 宿主 API 类型存根 |
 | `package.json` | 脚本、依赖、`omp.extensions` 发现入口 |
 | `tsconfig.json` | ES2022 / NodeNext / strict / 声明输出 |
-| `.omp/config.yml` | 当前项目的 Honcho `projectPeer` 配置示例 |
 | `.github/workflows/release.yml` | 基于 `v*` 标签自动发布到 npm（带 provenance） |
 
 ## Runtime/Tooling Preferences
